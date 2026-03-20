@@ -152,6 +152,7 @@
         }
         .conflict-banner.visible { display: block; }
 
+
         .confirm-btn {
             width: 100%; padding: 13px;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -187,6 +188,44 @@
         }
         .cancel-btn:active { transform: scale(0.95); }
         .no-bookings { color: #999; text-align: center; padding: 16px; font-size: 0.9em; }
+
+        /* 取消确认弹窗 */
+        .cancel-confirm-modal {
+            display: none; position: fixed; inset: 0;
+            background: rgba(0,0,0,0.5); justify-content: center;
+            align-items: center; z-index: 2000;
+        }
+        .cancel-confirm-modal.active { display: flex; }
+        .cancel-confirm-box {
+            background: white; border-radius: 16px; padding: 24px;
+            max-width: 360px; width: 88%;
+            animation: slideIn 0.25s ease-out;
+            text-align: center;
+        }
+        .cancel-confirm-box h3 { color: #333; font-size: 1.1em; margin-bottom: 14px; }
+        .cancel-confirm-info { color: #666; font-size: 0.88em; line-height: 1.6; margin-bottom: 14px; background: #f9f9f9; border-radius: 10px; padding: 12px; }
+        .cancel-confirm-hint { color: #999; font-size: 0.82em; margin-bottom: 10px; }
+        .cancel-confirm-input {
+            width: 100%; padding: 11px; border: 1.5px solid #e0e0e0;
+            border-radius: 10px; font-size: 1em; text-align: center;
+            transition: border-color 0.2s; -webkit-appearance: none; margin-bottom: 16px;
+        }
+        .cancel-confirm-input:focus { outline: none; border-color: #ff6b6b; border-width: 2px; padding: 10px; }
+        .cancel-confirm-input.error { border-color: #e53935; animation: shake 0.3s; }
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            25% { transform: translateX(-6px); }
+            75% { transform: translateX(6px); }
+        }
+        .cancel-confirm-error { color: #e53935; font-size: 0.8em; margin: -10px 0 12px; display: none; }
+        .cancel-confirm-btns { display: flex; gap: 10px; }
+        .cancel-confirm-btns button {
+            flex: 1; padding: 11px; border: none; border-radius: 22px;
+            font-size: 0.95em; font-weight: bold; cursor: pointer;
+        }
+        .cancel-confirm-btns .cancel-back { background: #f0f0f0; color: #666; }
+        .cancel-confirm-btns .cancel-go { background: #ff6b6b; color: white; box-shadow: 0 2px 8px rgba(255,107,107,0.3); }
+        .cancel-confirm-btns .cancel-go:disabled { background: #ccc; box-shadow: none; cursor: not-allowed; }
 
         /* 浮动详情按钮 */
         .share-fab {
@@ -245,7 +284,7 @@
         </div>
         <div class="my-bookings-query" id="myBookingsQuery">
             <div style="display:flex; gap:8px; margin-bottom:12px;">
-                <input type="tel" id="queryPhone" placeholder="输入手机号查看我的预约" style="flex:1; padding:10px 14px; border:1.5px solid #e0e0e0; border-radius:22px; font-size:0.95em; outline:none; transition:border-color 0.2s;" onfocus="this.style.borderColor='#667eea'" onblur="this.style.borderColor='#e0e0e0'">
+                <input type="tel" id="queryPhone" placeholder="输入手机号查看我的预约" style="flex:1; padding:10px 14px; border:1.5px solid #e0e0e0; border-radius:22px; font-size:0.95em; outline:none; transition:border-color 0.2s;" onfocus="autoFillQueryPhone(this)" onblur="this.style.borderColor='#e0e0e0'">
                 <button onclick="queryMyBookings()" style="padding:10px 20px; background:linear-gradient(135deg,#667eea 0%,#764ba2 100%); color:white; border:none; border-radius:22px; font-size:0.9em; font-weight:bold; cursor:pointer; white-space:nowrap; box-shadow:0 2px 8px rgba(102,126,234,0.35);">查询</button>
             </div>
         </div>
@@ -266,11 +305,13 @@
         <form id="bookingForm">
             <div class="form-group">
                 <label>学生姓名</label>
-                <input type="text" id="studentName" required placeholder="请输入学生姓名" oninput="onStudentNameChange()">
+                <input type="text" id="studentName" required placeholder="请输入学生完整中文姓名" autocomplete="off"
+                       oninput="onStudentNameChange()">
             </div>
             <div class="form-group">
                 <label>家长联系电话</label>
-                <input type="tel" id="phone" required placeholder="请输入联系电话">
+                <input type="tel" id="phone" required placeholder="请输入11位手机号" pattern="^1\d{10}$" maxlength="11"
+                       oninput="onPhoneChange()">
             </div>
             <div class="form-group">
                 <label>选择时间段</label>
@@ -308,11 +349,43 @@
     </div>
 </div>
 
+<!-- Cancel Confirm Modal -->
+<div class="cancel-confirm-modal" id="cancelConfirmModal">
+    <div class="cancel-confirm-box">
+        <h3>⚠️ 确认取消预约</h3>
+        <div class="cancel-confirm-info" id="cancelConfirmInfo"></div>
+        <div class="cancel-confirm-hint">请输入预约手机号以确认取消</div>
+        <input type="tel" class="cancel-confirm-input" id="cancelConfirmPhone" placeholder="请输入手机号" oninput="onCancelPhoneInput()">
+        <div class="cancel-confirm-error" id="cancelConfirmError">手机号不匹配</div>
+        <div class="cancel-confirm-btns">
+            <button class="cancel-back" onclick="closeCancelConfirm()">返回</button>
+            <button class="cancel-go" id="cancelGoBtn" disabled onclick="confirmCancelBooking()">确认取消</button>
+        </div>
+    </div>
+</div>
+
 <script>
 // ==================== API 配置 ====================
 // 自动检测 API 地址（同源部署，无需跨域）
-const API_BASE = window.location.origin + '/api';
+// 自动检测子路径部署（如 /ptc/）
+const BASE_PATH = window.location.pathname.replace(/\/[^/]*$/, '');
+const API_BASE = window.location.origin + BASE_PATH + '/api';
 const MEETING_DATE = '2026-04-03';
+
+// 日期格式化：将 ISO 字符串或任意日期格式化为 YYYY-MM-DD（东八区）
+function normalizeDate(d) {
+    if (!d) return '';
+    const s = typeof d === 'string' ? d : String(d);
+    // 已经是 YYYY-MM-DD 格式则直接返回
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    // ISO / 带时区字符串：用本地时间解析
+    const dt = new Date(s);
+    if (isNaN(dt)) return s;
+    const y = dt.getFullYear();
+    const m = String(dt.getMonth() + 1).padStart(2, '0');
+    const day = String(dt.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+}
 
 // API 请求封装
 async function apiGet(path) {
@@ -345,12 +418,13 @@ async function apiDelete(path, body) {
 }
 
 // ==================== 数据 ====================
-const TIME_SLOTS_ALL = [
+// 时间段从后端 API 动态加载，以下为兜底默认值
+let TIME_SLOTS_ALL = [
     '10:20-10:30','10:30-10:40','10:40-10:50','10:50-11:00',
     '11:00-11:10','11:10-11:20','11:20-11:30','11:30-11:40',
     '11:40-11:50','11:50-12:00','12:00-12:10','12:10-12:20'
 ];
-const TIME_SLOTS_LIMITED = [
+let TIME_SLOTS_LIMITED = [
     '10:30-10:40','10:40-10:50','10:50-11:00',
     '11:00-11:10','11:10-11:20','11:20-11:30','11:30-11:40',
     '11:40-11:50','11:50-12:00'
@@ -394,10 +468,8 @@ async function loadBookings() {
             teacherName: row.teacher_name,
             venue: row.venue,
             studentName: row.student_name,
-            phone: row.phone,
-            date: row.date,
-            timeSlot: row.time_slot,
-            notes: row.notes || ''
+            date: normalizeDate(row.date),
+            timeSlot: row.time_slot
         }));
     } catch (e) {
         console.error('加载预约失败:', e);
@@ -436,7 +508,7 @@ function renderTeachers() {
 }
 
 // ==================== 弹窗 ====================
-function openBookingModal(teacherId) {
+async function openBookingModal(teacherId) {
     selectedTeacher = teachers.find(t => t.id === teacherId);
     selectedSlot = null;
     document.getElementById('modalTeacherName').textContent = `预约 ${selectedTeacher.name}（${selectedTeacher.venue}）`;
@@ -444,10 +516,14 @@ function openBookingModal(teacherId) {
     // 自动填入保存的手机号
     let savedPhone = '';
     try { savedPhone = localStorage.getItem(LS_PHONE_KEY) || ''; } catch(e) {}
-    if (savedPhone) document.getElementById('phone').value = savedPhone;
+    if (savedPhone) {
+        document.getElementById('phone').value = savedPhone;
+        // 加载该手机号的预约记录，用于冲突检测
+        await loadMyBookings(savedPhone);
+    }
     document.getElementById('conflictBanner').classList.remove('visible');
     document.getElementById('conflictBanner').textContent = '';
-    renderTimeSlots('');
+    renderTimeSlots();
     document.getElementById('bookingModal').classList.add('active');
 }
 function closeModal() {
@@ -455,7 +531,7 @@ function closeModal() {
 }
 
 // ==================== 时间段渲染 ====================
-function renderTimeSlots(studentName) {
+function renderTimeSlots() {
     const container = document.getElementById('timeSlots');
     container.innerHTML = '';
     selectedSlot = null;
@@ -466,16 +542,15 @@ function renderTimeSlots(studentName) {
         .filter(b => b.teacherId === selectedTeacher.id && b.date === MEETING_DATE)
         .map(b => b.timeSlot);
 
-    const studentBooked = studentName.trim()
-        ? bookings
-            .filter(b => b.studentName === studentName.trim() && b.date === MEETING_DATE && b.teacherId !== selectedTeacher.id)
-            .map(b => b.timeSlot)
-        : [];
+    // 用 myBookings（当前手机号的预约）检测时间冲突，而非学生姓名
+    const phoneBooked = myBookings
+        .filter(b => b.date === MEETING_DATE && b.teacherId !== selectedTeacher.id)
+        .map(b => b.timeSlot);
 
     availableSlots.forEach(slot => {
         const el = document.createElement('div');
         const isTeacherBooked = teacherBooked.includes(slot);
-        const isConflict = studentBooked.includes(slot);
+        const isConflict = phoneBooked.includes(slot);
 
         if (isTeacherBooked) {
             el.className = 'time-slot booked';
@@ -483,7 +558,7 @@ function renderTimeSlots(studentName) {
         } else if (isConflict) {
             el.className = 'time-slot conflict';
             el.textContent = slot;
-            el.onclick = () => { showConflictBanner(slot, studentName.trim()); };
+            el.onclick = () => { showConflictBanner(slot); };
         } else {
             el.className = 'time-slot';
             el.textContent = slot;
@@ -494,8 +569,17 @@ function renderTimeSlots(studentName) {
 }
 
 function onStudentNameChange() {
-    const name = document.getElementById('studentName').value;
-    renderTimeSlots(name);
+    // 冲突检测已改为基于手机号，学生姓名变化不影响时间段状态
+    document.getElementById('conflictBanner').classList.remove('visible');
+}
+
+async function onPhoneChange() {
+    const phone = document.getElementById('phone').value.trim();
+    if (/^1\d{10}$/.test(phone)) {
+        // 手机号满11位，加载该号码的预约用于冲突检测
+        await loadMyBookings(phone);
+        renderTimeSlots();
+    }
     document.getElementById('conflictBanner').classList.remove('visible');
 }
 
@@ -506,15 +590,14 @@ function selectSlot(slot, el) {
     document.getElementById('conflictBanner').classList.remove('visible');
 }
 
-function showConflictBanner(slot, studentName) {
-    const conflictBooking = bookings.find(b =>
-        b.studentName === studentName &&
+function showConflictBanner(slot) {
+    const conflictBooking = myBookings.find(b =>
         b.date === MEETING_DATE &&
         b.timeSlot === slot &&
         b.teacherId !== selectedTeacher.id
     );
     const banner = document.getElementById('conflictBanner');
-    banner.innerHTML = `⚠️ 该学生「${studentName}」在 <strong>${slot}</strong> 已预约了 <strong>${conflictBooking ? conflictBooking.teacherName : '其他老师'}</strong>，请选择其他时间段，或在"我的预约"中取消。`;
+    banner.innerHTML = `⚠️ 您在 <strong>${slot}</strong> 已预约了 <strong>${conflictBooking ? conflictBooking.teacherName : '其他老师'}</strong>，请选择其他时间段，或在"我的预约"中取消。`;
     banner.classList.add('visible');
 }
 
@@ -534,15 +617,14 @@ document.getElementById('bookingForm').addEventListener('submit', async function
     const phone = document.getElementById('phone').value.trim();
     const notes = document.getElementById('notes').value.trim();
 
-    // 前端校验冲突
-    const conflict = bookings.find(b =>
-        b.studentName === studentName &&
+    // 前端校验冲突（基于手机号 — myBookings）
+    const conflict = myBookings.find(b =>
         b.date === MEETING_DATE &&
         b.timeSlot === selectedSlot &&
         b.teacherId !== selectedTeacher.id
     );
     if (conflict) {
-        showConflictBanner(selectedSlot, studentName);
+        showConflictBanner(selectedSlot);
         return;
     }
 
@@ -571,10 +653,9 @@ document.getElementById('bookingForm').addEventListener('submit', async function
             notes: newBooking.notes || ''
         });
 
-        // 保存手机号到 LocalStorage，自动填入查询框
+        // 保存手机号到 LocalStorage
         const bookedPhone = phone;
         try { localStorage.setItem(LS_PHONE_KEY, bookedPhone); } catch(e) {}
-        document.getElementById('queryPhone').value = bookedPhone;
 
         closeModal();
         renderTeachers();
@@ -594,6 +675,16 @@ document.getElementById('bookingForm').addEventListener('submit', async function
 });
 
 // ==================== 我的预约查询 ====================
+// 聚焦时自动填充保存的手机号
+function autoFillQueryPhone(el) {
+    el.style.borderColor = '#667eea';
+    if (!el.value.trim()) {
+        let savedPhone = '';
+        try { savedPhone = localStorage.getItem(LS_PHONE_KEY) || ''; } catch(e) {}
+        if (savedPhone) el.value = savedPhone;
+    }
+}
+
 async function loadMyBookings(phone) {
     if (!phone?.trim()) return;
     try {
@@ -604,8 +695,7 @@ async function loadMyBookings(phone) {
             teacherName: row.teacher_name,
             venue: row.venue,
             studentName: row.student_name,
-            phone: row.phone,
-            date: row.date,
+            date: normalizeDate(row.date),
             timeSlot: row.time_slot,
             notes: row.notes || ''
         }));
@@ -641,14 +731,14 @@ document.getElementById('queryPhone').addEventListener('keyup', function(e) {
 
 function renderMyBookings() {
     const list = document.getElementById('myBookingsList');
-    const phone = document.getElementById('queryPhone').value.trim();
 
-    if (!phone) {
-        list.innerHTML = '<div class="no-bookings">输入预约时填写的手机号，查看您的预约记录</div>';
-        return;
-    }
     if (!myBookings.length) {
-        list.innerHTML = '<div class="no-bookings">暂无预约记录</div>';
+        const phone = document.getElementById('queryPhone').value.trim();
+        if (!phone) {
+            list.innerHTML = '<div class="no-bookings">输入预约时填写的手机号，查看您的预约记录</div>';
+        } else {
+            list.innerHTML = '<div class="no-bookings">暂无预约记录</div>';
+        }
         return;
     }
     const sorted = [...myBookings].sort((a, b) => a.timeSlot.localeCompare(b.timeSlot));
@@ -665,28 +755,75 @@ function renderMyBookings() {
     `).join('');
 }
 
+let cancelPendingId = null; // 待取消的预约 ID
+
 async function cancelBooking(id) {
     const booking = myBookings.find(b => b.id === id);
     if (!booking) return;
 
-    if (!confirm(`确认取消预约？\n${booking.teacherName} — ${booking.studentName}\n${booking.timeSlot}`)) return;
+    cancelPendingId = id;
+    document.getElementById('cancelConfirmInfo').innerHTML =
+        `<strong>${booking.teacherName}</strong> — ${booking.studentName}<br>⏰ ${booking.timeSlot}　📍 ${booking.venue}`;
+    document.getElementById('cancelConfirmPhone').value = '';
+    document.getElementById('cancelConfirmError').style.display = 'none';
+    document.getElementById('cancelConfirmPhone').classList.remove('error');
+    document.getElementById('cancelGoBtn').disabled = true;
+    document.getElementById('cancelConfirmModal').classList.add('active');
+    // 聚焦输入框
+    setTimeout(() => document.getElementById('cancelConfirmPhone').focus(), 200);
+}
 
-    const phone = document.getElementById('queryPhone').value.trim();
+function onCancelPhoneInput() {
+    const input = document.getElementById('cancelConfirmPhone');
+    const btn = document.getElementById('cancelGoBtn');
+    document.getElementById('cancelConfirmError').style.display = 'none';
+    input.classList.remove('error');
+    btn.disabled = !input.value.trim();
+}
+
+function closeCancelConfirm() {
+    document.getElementById('cancelConfirmModal').classList.remove('active');
+    cancelPendingId = null;
+}
+
+async function confirmCancelBooking() {
+    if (!cancelPendingId) return;
+
+    const booking = myBookings.find(b => b.id === cancelPendingId);
+    if (!booking) return;
+
+    const inputPhone = document.getElementById('cancelConfirmPhone').value.trim();
+    if (!inputPhone) return;
+
     isLoading = true;
     showToast('⏳ 正在取消...');
     try {
-        await apiDelete(`/bookings/${id}`, { phone });
+        await apiDelete(`/bookings/${cancelPendingId}`, { phone: inputPhone });
         // 从本地数据中移除
-        myBookings = myBookings.filter(b => b.id !== id);
-        bookings = bookings.filter(b => b.id !== id);
+        myBookings = myBookings.filter(b => b.id !== cancelPendingId);
+        bookings = bookings.filter(b => b.id !== cancelPendingId);
+        closeCancelConfirm();
         renderTeachers();
         renderMyBookings();
         showToast('✅ 已取消预约');
     } catch (e) {
-        showToast('❌ ' + (e.message || '取消失败'));
+        // 手机号不匹配时后端返回403
+        if (e.message && e.message.includes('手机号')) {
+            document.getElementById('cancelConfirmPhone').classList.add('error');
+            document.getElementById('cancelConfirmError').style.display = 'block';
+        } else {
+            showToast('❌ ' + (e.message || '取消失败'));
+        }
     }
     isLoading = false;
 }
+
+// 支持回车确认取消
+document.getElementById('cancelConfirmPhone').addEventListener('keyup', function(e) {
+    if (e.key === 'Enter' && !document.getElementById('cancelGoBtn').disabled) confirmCancelBooking();
+});
+// 点击遮罩关闭
+document.getElementById('cancelConfirmModal').addEventListener('click', function(e) { if (e.target === this) closeCancelConfirm(); });
 
 function openDetailModal() { document.getElementById('detailModal').classList.add('active'); }
 function closeDetailModal() { document.getElementById('detailModal').classList.remove('active'); }
@@ -715,18 +852,28 @@ if (detailModal) {
     detailModal.addEventListener('click', function(e) { if (e.target === this) closeDetailModal(); });
 }
 
+// ==================== 加载时间段配置 ====================
+async function loadTimeSlots() {
+    try {
+        const data = await apiGet('/time-slots');
+        if (data.all && data.all.length > 0) TIME_SLOTS_ALL = data.all;
+        if (data.limited && data.limited.length > 0) TIME_SLOTS_LIMITED = data.limited;
+    } catch (e) {
+        console.warn('时间段配置加载失败，使用默认值:', e.message);
+    }
+}
+
 // ==================== 初始化 ====================
 async function init() {
     showToast('🔄 正在加载数据...');
     try {
-        await Promise.all([loadTeachers(), loadBookings()]);
+        await Promise.all([loadTimeSlots(), loadTeachers(), loadBookings()]);
         renderTeachers();
 
-        // 从 LocalStorage 恢复手机号并自动查询
+        // 从 LocalStorage 恢复手机号，后台静默加载预约（但不显示在查询框）
         let savedPhone = '';
         try { savedPhone = localStorage.getItem(LS_PHONE_KEY) || ''; } catch(e) {}
         if (savedPhone) {
-            document.getElementById('queryPhone').value = savedPhone;
             await loadMyBookings(savedPhone);
             renderMyBookings();
             if (myBookings.length > 0) {

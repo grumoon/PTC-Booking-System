@@ -145,20 +145,26 @@ app.get('/api/teachers', async (req, res) => {
   }
 });
 
-// 2. 获取预约列表
+// 2. 获取预约列表（公开接口 — 脱敏处理）
 app.get('/api/bookings', async (req, res) => {
   try {
     const date = req.query.date || await getMeetingDate();
 
     const [rows] = await pool.execute(
-      `SELECT id, teacher_id, teacher_name, venue, student_name, phone, date, time_slot, notes, created_at
+      `SELECT id, teacher_id, teacher_name, venue, student_name, date, time_slot, created_at
        FROM bookings
        WHERE date = ? AND status = 1
        ORDER BY time_slot ASC`,
       [date]
     );
 
-    res.json({ code: 0, data: rows });
+    // 脱敏：学生姓名只显示姓 + *，不返回手机号
+    const safeRows = rows.map(r => ({
+      ...r,
+      student_name: r.student_name ? r.student_name.charAt(0) + '*'.repeat(r.student_name.length - 1) : ''
+    }));
+
+    res.json({ code: 0, data: safeRows });
   } catch (err) {
     console.error('获取预约列表失败:', err);
     res.status(500).json({ code: 500, message: '服务器内部错误' });
@@ -177,6 +183,30 @@ app.post('/api/bookings', bookingLimiter, async (req, res) => {
       return res.status(400).json({ code: 400, message: '请填写完整信息' });
     }
 
+    // 手机号格式校验：必须是1开头的11位数字
+    if (!/^1\d{10}$/.test(phone.trim())) {
+      return res.status(400).json({ code: 400, message: '请输入正确的11位手机号' });
+    }
+
+    // 日期格式校验
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ code: 400, message: '日期格式不正确' });
+    }
+
+    // 时间段格式校验（必须是 HH:MM-HH:MM 格式）
+    if (!/^\d{2}:\d{2}-\d{2}:\d{2}$/.test(time_slot)) {
+      return res.status(400).json({ code: 400, message: '时间段格式不正确' });
+    }
+
+    // 校验学生是否在名册中
+    const [rosterCheck] = await pool.execute(
+      'SELECT id FROM students WHERE name = ?',
+      [student_name.trim()]
+    );
+    if (rosterCheck.length === 0) {
+      return res.status(400).json({ code: 1010, message: '学生姓名有误，请输入正确的完整中文姓名' });
+    }
+
     await conn.beginTransaction();
 
     // 查老师信息
@@ -186,6 +216,15 @@ app.post('/api/bookings', bookingLimiter, async (req, res) => {
       return res.status(400).json({ code: 1000, message: '老师不存在' });
     }
     const teacher = teacherRows[0];
+
+    // 检查0：校验时间段是否在该老师可用的时段列表中
+    const slotsKey = teacher.limited_slots ? 'time_slots_limited' : 'time_slots_all';
+    const slotsStr = await getConfig(slotsKey, '');
+    const validSlots = slotsStr.split(',').map(s => s.trim()).filter(Boolean);
+    if (validSlots.length > 0 && !validSlots.includes(time_slot)) {
+      await conn.rollback();
+      return res.status(400).json({ code: 400, message: '该时间段不可用' });
+    }
 
     // 检查1：该老师该时段是否已被预约
     const [slotCheck] = await conn.execute(
@@ -197,16 +236,16 @@ app.post('/api/bookings', bookingLimiter, async (req, res) => {
       return res.status(409).json({ code: 1001, message: '该时段已被预约' });
     }
 
-    // 检查2：该学生该时段是否已预约其他老师
-    const [studentCheck] = await conn.execute(
-      'SELECT teacher_name FROM bookings WHERE student_name = ? AND date = ? AND time_slot = ? AND status = 1',
-      [student_name.trim(), date, time_slot]
+    // 检查2：该手机号（家长）该时段是否已预约其他老师
+    const [phoneCheck] = await conn.execute(
+      'SELECT teacher_name FROM bookings WHERE phone = ? AND date = ? AND time_slot = ? AND status = 1 FOR UPDATE',
+      [phone.trim(), date, time_slot]
     );
-    if (studentCheck.length > 0) {
+    if (phoneCheck.length > 0) {
       await conn.rollback();
       return res.status(409).json({
         code: 1002,
-        message: `该学生在此时段已预约了 ${studentCheck[0].teacher_name}`
+        message: `该手机号在此时段已预约了 ${phoneCheck[0].teacher_name}`
       });
     }
 
@@ -222,8 +261,8 @@ app.post('/api/bookings', bookingLimiter, async (req, res) => {
 
     // 插入预约
     const [result] = await conn.execute(
-      `INSERT INTO bookings (teacher_id, teacher_name, venue, student_name, phone, date, time_slot, notes, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+      `INSERT INTO bookings (teacher_id, teacher_name, venue, student_name, phone, date, time_slot, notes, status, booked_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, NOW())`,
       [teacher_id, teacher.name, teacher.venue, student_name.trim(), phone.trim(), date, time_slot, notes || '']
     );
 
@@ -269,7 +308,7 @@ app.post('/api/bookings', bookingLimiter, async (req, res) => {
 
 // 4. 查询我的预约（根据手机号）
 app.get('/api/my-bookings', rateLimit({
-  windowMs: 60 * 1000, max: 20,
+  windowMs: 60 * 1000, max: 10,
   message: { code: 429, message: '查询过于频繁，请稍后再试' }
 }), async (req, res) => {
   try {
@@ -280,15 +319,26 @@ app.get('/api/my-bookings', rateLimit({
       return res.status(400).json({ code: 400, message: '请输入手机号' });
     }
 
+    // 手机号格式校验：必须是11位数字
+    if (!/^1\d{10}$/.test(phone)) {
+      return res.status(400).json({ code: 400, message: '手机号格式不正确' });
+    }
+
     const [rows] = await pool.execute(
-      `SELECT id, teacher_id, teacher_name, venue, student_name, phone, date, time_slot, notes, created_at
+      `SELECT id, teacher_id, teacher_name, venue, student_name, date, time_slot, notes, created_at
        FROM bookings
        WHERE phone = ? AND date = ? AND status = 1
        ORDER BY time_slot ASC`,
       [phone, date]
     );
 
-    res.json({ code: 0, data: rows });
+    // 返回时手机号脱敏（前3后4）
+    const safeRows = rows.map(r => ({
+      ...r,
+      phone: phone.substring(0, 3) + '****' + phone.substring(7)
+    }));
+
+    res.json({ code: 0, data: safeRows });
   } catch (err) {
     console.error('查询我的预约失败:', err);
     res.status(500).json({ code: 500, message: '服务器内部错误' });
@@ -300,10 +350,14 @@ app.delete('/api/bookings/:id', bookingLimiter, async (req, res) => {
   try {
     const bookingId = parseInt(req.params.id);
     const { phone } = req.body || {};
-    const isAdmin = req.query.admin === 'true';
 
     if (!bookingId) {
       return res.status(400).json({ code: 400, message: '无效的预约ID' });
+    }
+
+    // 必须提供手机号验证身份
+    if (!phone?.trim()) {
+      return res.status(400).json({ code: 400, message: '请输入手机号验证身份' });
     }
 
     // 查找预约
@@ -317,25 +371,20 @@ app.delete('/api/bookings/:id', bookingLimiter, async (req, res) => {
 
     const booking = rows[0];
 
-    // 非管理员需验证手机号
-    if (!isAdmin) {
-      if (!phone?.trim()) {
-        return res.status(400).json({ code: 400, message: '请输入手机号验证身份' });
-      }
-      if (phone.trim() !== booking.phone) {
-        return res.status(403).json({ code: 403, message: '手机号不正确' });
-      }
+    // 验证手机号
+    if (phone.trim() !== booking.phone) {
+      return res.status(403).json({ code: 403, message: '手机号不正确' });
     }
 
-    // 软删除（status 改为 0）
+    // 软删除（status 改为 0，记录取消时间和取消者）
     await pool.execute(
-      'UPDATE bookings SET status = 0 WHERE id = ?',
-      [bookingId]
+      'UPDATE bookings SET status = 0, cancelled_at = NOW(), cancelled_by = ? WHERE id = ?',
+      ['parent', bookingId]
     );
 
     // 审计日志
     await logAudit('CANCEL', 'BOOKING', bookingId,
-      `${booking.student_name} / ${phone || 'admin'}`,
+      `${booking.student_name} / ${phone}`,
       getClientIP(req),
       { teacher_name: booking.teacher_name, time_slot: booking.time_slot, date: booking.date }
     );
@@ -348,7 +397,7 @@ app.delete('/api/bookings/:id', bookingLimiter, async (req, res) => {
 });
 
 // 5. 导出数据（管理员用）
-app.get('/api/export', async (req, res) => {
+app.get('/api/export', adminAuth, async (req, res) => {
   try {
     const date = req.query.date || await getMeetingDate();
 
@@ -366,6 +415,30 @@ app.get('/api/export', async (req, res) => {
     res.json({ code: 0, data: rows });
   } catch (err) {
     console.error('导出数据失败:', err);
+    res.status(500).json({ code: 500, message: '服务器内部错误' });
+  }
+});
+
+// 获取时间段配置（公开接口，带缓存）
+let timeSlotsCache = { value: null, expiry: 0 };
+app.get('/api/time-slots', async (req, res) => {
+  try {
+    const now = Date.now();
+    if (timeSlotsCache.value && now < timeSlotsCache.expiry) {
+      return res.json({ code: 0, data: timeSlotsCache.value });
+    }
+    const allStr = await getConfig('time_slots_all', '10:20-10:30,10:30-10:40,10:40-10:50,10:50-11:00,11:00-11:10,11:10-11:20,11:20-11:30,11:30-11:40,11:40-11:50,11:50-12:00,12:00-12:10,12:10-12:20');
+    const limitedStr = await getConfig('time_slots_limited', '10:30-10:40,10:40-10:50,10:50-11:00,11:00-11:10,11:10-11:20,11:20-11:30,11:30-11:40,11:40-11:50,11:50-12:00');
+    const defaultTotalSlots = parseInt(await getConfig('default_total_slots', '12')) || 12;
+    const result = {
+      all: allStr.split(',').map(s => s.trim()).filter(Boolean),
+      limited: limitedStr.split(',').map(s => s.trim()).filter(Boolean),
+      default_total_slots: defaultTotalSlots
+    };
+    timeSlotsCache = { value: result, expiry: now + 5 * 60 * 1000 };
+    res.json({ code: 0, data: result });
+  } catch (err) {
+    console.error('获取时间段配置失败:', err);
     res.status(500).json({ code: 500, message: '服务器内部错误' });
   }
 });
@@ -388,7 +461,11 @@ app.post('/api/admin/login', rateLimit({
   message: { code: 429, message: '登录尝试过多，请15分钟后再试' }
 }), async (req, res) => {
   const { password } = req.body;
-  const adminPassword = await getConfig('admin_password', 'ptc2026admin');
+  const adminPassword = await getConfig('admin_password', '');
+  if (!adminPassword) {
+    console.error('管理员密码未配置，请在 admin_config 表中设置 admin_password');
+    return res.status(500).json({ code: 500, message: '系统未配置管理员密码，请联系管理员' });
+  }
   if (password !== adminPassword) {
     await logAudit('ADMIN_LOGIN_FAIL', 'ADMIN', null, 'admin', getClientIP(req), null);
     return res.status(403).json({ code: 403, message: '密码错误' });
@@ -445,6 +522,13 @@ app.get('/api/admin/dashboard', adminAuth, async (req, res) => {
       GROUP BY time_slot ORDER BY time_slot
     `, [date]);
 
+    // 交叉明细：每个老师×时段的预约情况（用于二维表格）
+    const [crossData] = await pool.execute(`
+      SELECT teacher_id, time_slot, student_name, phone
+      FROM bookings WHERE date = ? AND status = 1
+      ORDER BY teacher_id, time_slot
+    `, [date]);
+
     // 总名额
     const [slotsTotal] = await pool.execute('SELECT SUM(total_slots) as total FROM teachers');
 
@@ -457,7 +541,8 @@ app.get('/api/admin/dashboard', adminAuth, async (req, res) => {
         total_capacity: slotsTotal[0].total || 0,
         booking_rate: slotsTotal[0].total ? Math.round(totalRows[0].total / slotsTotal[0].total * 100) : 0,
         teacher_stats: teacherStats,
-        slot_stats: slotStats
+        slot_stats: slotStats,
+        cross_data: crossData
       }
     });
   } catch (err) {
@@ -500,7 +585,7 @@ app.get('/api/admin/bookings', adminAuth, async (req, res) => {
 
     const [rows] = await pool.execute(
       `SELECT b.id, b.teacher_id, b.teacher_name, b.venue, b.student_name, b.phone,
-              b.date, b.time_slot, b.notes, b.status, b.created_at
+              b.date, b.time_slot, b.notes, b.status, b.created_at, b.booked_at, b.cancelled_at, b.cancelled_by
        FROM bookings b ${where}
        ORDER BY b.time_slot ASC, b.teacher_name ASC
        LIMIT ? OFFSET ?`,
@@ -532,7 +617,7 @@ app.delete('/api/admin/bookings/:id', adminAuth, async (req, res) => {
       return res.status(404).json({ code: 404, message: '预约不存在或已取消' });
     }
     const booking = rows[0];
-    await pool.execute('UPDATE bookings SET status = 0 WHERE id = ?', [bookingId]);
+    await pool.execute('UPDATE bookings SET status = 0, cancelled_at = NOW(), cancelled_by = ? WHERE id = ?', ['admin', bookingId]);
     await logAudit('ADMIN_CANCEL', 'BOOKING', bookingId, 'admin',
       getClientIP(req),
       { teacher_name: booking.teacher_name, student_name: booking.student_name, time_slot: booking.time_slot }
@@ -562,6 +647,14 @@ app.post('/api/admin/teachers', adminAuth, async (req, res) => {
     if (!name?.trim() || !subjects?.trim() || !venue?.trim()) {
       return res.status(400).json({ code: 400, message: '姓名、科目、教室不能为空' });
     }
+    // 如果是受限老师，自动限制 total_slots 不超过受限时段数
+    const defaultSlots = parseInt(await getConfig('default_total_slots', '12')) || 12;
+    let finalSlots = total_slots || defaultSlots;
+    if (limited_slots) {
+      const limitedStr = await getConfig('time_slots_limited', '10:30-10:40,10:40-10:50,10:50-11:00,11:00-11:10,11:10-11:20,11:20-11:30,11:30-11:40,11:40-11:50,11:50-12:00');
+      const limitedCount = limitedStr.split(',').filter(Boolean).length;
+      if (finalSlots > limitedCount) finalSlots = limitedCount;
+    }
     let teacherId = id;
     if (!teacherId) {
       const [maxRow] = await pool.execute('SELECT MAX(id) as maxId FROM teachers');
@@ -570,7 +663,7 @@ app.post('/api/admin/teachers', adminAuth, async (req, res) => {
     await pool.execute(
       `INSERT INTO teachers (id, name, subjects, venue, icon, total_slots, limited_slots)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [teacherId, name.trim(), subjects.trim(), venue.trim(), icon || '👨‍🏫', total_slots || 12, limited_slots ? 1 : 0]
+      [teacherId, name.trim(), subjects.trim(), venue.trim(), icon || '👨‍🏫', finalSlots, limited_slots ? 1 : 0]
     );
     await logAudit('CREATE_TEACHER', 'TEACHER', teacherId, 'admin', getClientIP(req), { name: name.trim() });
     res.json({ code: 0, message: '添加成功', data: { id: teacherId } });
@@ -592,6 +685,14 @@ app.put('/api/admin/teachers/:id', adminAuth, async (req, res) => {
     if (existing.length === 0) {
       return res.status(404).json({ code: 404, message: '教师不存在' });
     }
+    // 确定最终的 limited_slots 和 total_slots
+    const finalLimited = limited_slots !== undefined ? (limited_slots ? 1 : 0) : existing[0].limited_slots;
+    let finalSlots = total_slots !== undefined ? total_slots : existing[0].total_slots;
+    if (finalLimited) {
+      const limitedStr = await getConfig('time_slots_limited', '10:30-10:40,10:40-10:50,10:50-11:00,11:00-11:10,11:10-11:20,11:20-11:30,11:30-11:40,11:40-11:50,11:50-12:00');
+      const limitedCount = limitedStr.split(',').filter(Boolean).length;
+      if (finalSlots > limitedCount) finalSlots = limitedCount;
+    }
     await pool.execute(
       `UPDATE teachers SET name = ?, subjects = ?, venue = ?, icon = ?, total_slots = ?, limited_slots = ?
        WHERE id = ?`,
@@ -600,8 +701,8 @@ app.put('/api/admin/teachers/:id', adminAuth, async (req, res) => {
         subjects?.trim() || existing[0].subjects,
         venue?.trim() || existing[0].venue,
         icon || existing[0].icon,
-        total_slots !== undefined ? total_slots : existing[0].total_slots,
-        limited_slots !== undefined ? (limited_slots ? 1 : 0) : existing[0].limited_slots,
+        finalSlots,
+        finalLimited,
         teacherId
       ]
     );
@@ -682,7 +783,7 @@ app.get('/api/admin/export', adminAuth, async (req, res) => {
     const date = req.query.date || await getMeetingDate();
     const [rows] = await pool.execute(
       `SELECT b.id, b.teacher_name, b.venue, b.student_name, b.phone,
-              b.date, b.time_slot, b.notes, b.created_at
+              b.date, b.time_slot, b.notes, b.created_at, b.booked_at
        FROM bookings b WHERE b.date = ? AND b.status = 1
        ORDER BY b.time_slot ASC, b.teacher_name ASC`,
       [date]
@@ -695,6 +796,99 @@ app.get('/api/admin/export', adminAuth, async (req, res) => {
   }
 });
 
+// ==================== 学生名册管理（管理员） ====================
+
+// 列表
+app.get('/api/admin/students', adminAuth, async (req, res) => {
+  try {
+    const [rows] = await pool.execute('SELECT * FROM students ORDER BY class_name, name');
+    res.json({ code: 0, data: rows });
+  } catch (err) {
+    console.error('获取学生名册失败:', err);
+    res.status(500).json({ code: 500, message: '服务器错误' });
+  }
+});
+
+// 新增单个
+app.post('/api/admin/students', adminAuth, async (req, res) => {
+  try {
+    const { name, class_name } = req.body;
+    if (!name?.trim()) {
+      return res.status(400).json({ code: 400, message: '学生姓名不能为空' });
+    }
+    // 检查重名
+    const [dup] = await pool.execute('SELECT id FROM students WHERE name = ?', [name.trim()]);
+    if (dup.length > 0) {
+      return res.status(409).json({ code: 409, message: '该学生已存在' });
+    }
+    const [result] = await pool.execute(
+      'INSERT INTO students (name, class_name) VALUES (?, ?)',
+      [name.trim(), (class_name || '').trim()]
+    );
+    await logAudit('CREATE_STUDENT', 'STUDENT', result.insertId, 'admin', getClientIP(req), { name: name.trim() });
+    res.json({ code: 0, message: '添加成功', data: { id: result.insertId } });
+  } catch (err) {
+    console.error('新增学生失败:', err);
+    res.status(500).json({ code: 500, message: '服务器错误' });
+  }
+});
+
+// 批量导入
+app.post('/api/admin/students/batch', adminAuth, async (req, res) => {
+  try {
+    const { students } = req.body; // [{ name, class_name }]
+    if (!Array.isArray(students) || students.length === 0) {
+      return res.status(400).json({ code: 400, message: '请提供学生列表' });
+    }
+    let added = 0, skipped = 0;
+    for (const s of students) {
+      if (!s.name?.trim()) { skipped++; continue; }
+      const [dup] = await pool.execute('SELECT id FROM students WHERE name = ?', [s.name.trim()]);
+      if (dup.length > 0) { skipped++; continue; }
+      await pool.execute(
+        'INSERT INTO students (name, class_name) VALUES (?, ?)',
+        [s.name.trim(), (s.class_name || '').trim()]
+      );
+      added++;
+    }
+    await logAudit('BATCH_IMPORT_STUDENTS', 'STUDENT', null, 'admin', getClientIP(req), { added, skipped, total: students.length });
+    res.json({ code: 0, message: `导入完成：新增 ${added} 人，跳过 ${skipped} 人` });
+  } catch (err) {
+    console.error('批量导入学生失败:', err);
+    res.status(500).json({ code: 500, message: '服务器错误' });
+  }
+});
+
+// 删除单个
+app.delete('/api/admin/students/:id', adminAuth, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const [rows] = await pool.execute('SELECT * FROM students WHERE id = ?', [id]);
+    if (rows.length === 0) {
+      return res.status(404).json({ code: 404, message: '学生不存在' });
+    }
+    await pool.execute('DELETE FROM students WHERE id = ?', [id]);
+    await logAudit('DELETE_STUDENT', 'STUDENT', id, 'admin', getClientIP(req), { name: rows[0].name });
+    res.json({ code: 0, message: '删除成功' });
+  } catch (err) {
+    console.error('删除学生失败:', err);
+    res.status(500).json({ code: 500, message: '服务器错误' });
+  }
+});
+
+// 清空全部
+app.delete('/api/admin/students', adminAuth, async (req, res) => {
+  try {
+    const [countRows] = await pool.execute('SELECT COUNT(*) as cnt FROM students');
+    await pool.execute('DELETE FROM students');
+    await logAudit('CLEAR_STUDENTS', 'STUDENT', null, 'admin', getClientIP(req), { count: countRows[0].cnt });
+    res.json({ code: 0, message: `已清空 ${countRows[0].cnt} 名学生` });
+  } catch (err) {
+    console.error('清空学生名册失败:', err);
+    res.status(500).json({ code: 500, message: '服务器错误' });
+  }
+});
+
 // SPA fallback — 所有非 API、非 admin 路由返回 index.html
 app.get('/{*path}', (req, res) => {
   if (!req.path.startsWith('/api/') && !req.path.startsWith('/admin')) {
@@ -703,8 +897,8 @@ app.get('/{*path}', (req, res) => {
 });
 
 // ==================== 启动服务 ====================
-app.listen(PORT, '0.0.0.0', async () => {
+app.listen(PORT, '127.0.0.1', async () => {
   const meetingDate = await getMeetingDate();
-  console.log(`🚀 PTC Booking API 运行在 http://0.0.0.0:${PORT}`);
+  console.log(`🚀 PTC Booking API 运行在 http://127.0.0.1:${PORT}`);
   console.log(`📅 会议日期: ${meetingDate}`);
 });

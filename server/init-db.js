@@ -39,6 +39,9 @@ async function initDB() {
         time_slot VARCHAR(20) NOT NULL COMMENT '时间段',
         notes TEXT COMMENT '备注',
         status TINYINT DEFAULT 1 COMMENT '状态: 1=有效 0=已取消',
+        booked_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '预约时间',
+        cancelled_at DATETIME DEFAULT NULL COMMENT '取消时间',
+        cancelled_by VARCHAR(20) DEFAULT NULL COMMENT '取消者: parent=家长 admin=管理员',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         INDEX idx_teacher_date (teacher_id, date, status),
@@ -76,15 +79,34 @@ async function initDB() {
     `);
     console.log('✅ admin_config 表已创建');
 
-    // 插入默认管理员密码（明文存储）
+    // 5. 创建 students 学生名册表
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS students (
+        id INT AUTO_INCREMENT PRIMARY KEY COMMENT '学生ID',
+        name VARCHAR(100) NOT NULL COMMENT '学生姓名',
+        class_name VARCHAR(100) DEFAULT '' COMMENT '班级',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uk_name (name)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='学生名册'
+    `);
+    console.log('✅ students 表已创建');
+
+    // 插入默认管理员密码（从环境变量读取，不在代码中硬编码）
     const [configExists] = await conn.execute(
       "SELECT COUNT(*) as cnt FROM admin_config WHERE config_key = 'admin_password'"
     );
     if (configExists[0].cnt === 0) {
-      await conn.execute(
-        "INSERT INTO admin_config (config_key, config_value, description) VALUES ('admin_password', 'ptc2026admin', '管理员登录密码')"
-      );
-      console.log('✅ 已设置默认管理员密码');
+      const defaultPassword = process.env.ADMIN_PASSWORD;
+      if (!defaultPassword) {
+        console.log('⚠️  未设置 ADMIN_PASSWORD 环境变量，跳过管理员密码初始化。请手动设置：');
+        console.log('   export ADMIN_PASSWORD=你的密码 && node init-db.js');
+      } else {
+        await conn.execute(
+          "INSERT INTO admin_config (config_key, config_value, description) VALUES ('admin_password', ?, '管理员登录密码')",
+          [defaultPassword]
+        );
+        console.log('✅ 已设置默认管理员密码（来自环境变量）');
+      }
     } else {
       console.log('ℹ️  管理员密码已存在，跳过');
     }
@@ -100,6 +122,45 @@ async function initDB() {
       console.log('✅ 已设置默认会议日期');
     } else {
       console.log('ℹ️  会议日期已存在，跳过');
+    }
+
+    // 插入默认时间段配置（全部时段）
+    const [slotsAllExists] = await conn.execute(
+      "SELECT COUNT(*) as cnt FROM admin_config WHERE config_key = 'time_slots_all'"
+    );
+    if (slotsAllExists[0].cnt === 0) {
+      await conn.execute(
+        "INSERT INTO admin_config (config_key, config_value, description) VALUES ('time_slots_all', '10:20-10:30,10:30-10:40,10:40-10:50,10:50-11:00,11:00-11:10,11:10-11:20,11:20-11:30,11:30-11:40,11:40-11:50,11:50-12:00,12:00-12:10,12:10-12:20', '全部可选时间段')"
+      );
+      console.log('✅ 已设置默认全部时段');
+    } else {
+      console.log('ℹ️  全部时段配置已存在，跳过');
+    }
+
+    // 插入默认时间段配置（受限时段）
+    const [slotsLimitedExists] = await conn.execute(
+      "SELECT COUNT(*) as cnt FROM admin_config WHERE config_key = 'time_slots_limited'"
+    );
+    if (slotsLimitedExists[0].cnt === 0) {
+      await conn.execute(
+        "INSERT INTO admin_config (config_key, config_value, description) VALUES ('time_slots_limited', '10:30-10:40,10:40-10:50,10:50-11:00,11:00-11:10,11:10-11:20,11:20-11:30,11:30-11:40,11:40-11:50,11:50-12:00', '受限老师可选时间段')"
+      );
+      console.log('✅ 已设置默认受限时段');
+    } else {
+      console.log('ℹ️  受限时段配置已存在，跳过');
+    }
+
+    // 插入默认名额配置
+    const [slotsDefaultExists] = await conn.execute(
+      "SELECT COUNT(*) as cnt FROM admin_config WHERE config_key = 'default_total_slots'"
+    );
+    if (slotsDefaultExists[0].cnt === 0) {
+      await conn.execute(
+        "INSERT INTO admin_config (config_key, config_value, description) VALUES ('default_total_slots', '12', '新增教师默认名额数')"
+      );
+      console.log('✅ 已设置默认名额数');
+    } else {
+      console.log('ℹ️  默认名额配置已存在，跳过');
     }
 
     // 5. 插入初始老师数据（先清空再插入）

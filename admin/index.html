@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PTC 管理后台</title>
     <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -166,6 +167,47 @@
         .teacher-stat-bar { flex: 1; margin: 0 16px; }
         .teacher-stat-num { font-size: 0.85em; color: #666; min-width: 60px; text-align: right; }
 
+        /* ===== 二维交叉表格 ===== */
+        .cross-table-wrapper {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+        .cross-table {
+            width: 100%; border-collapse: collapse; font-size: 0.92em;
+            min-width: 700px;
+        }
+        .cross-table th, .cross-table td {
+            border: 1px solid #e8e8e8; padding: 10px 12px; text-align: center;
+        }
+        .cross-table thead th {
+            background: #f6f7fb; color: #555; font-weight: 600;
+            position: sticky; top: 0; z-index: 2;
+        }
+        .cross-table thead th:first-child {
+            position: sticky; left: 0; z-index: 3; background: #edeef3;
+        }
+        .cross-table tbody td:first-child {
+            position: sticky; left: 0; z-index: 1; background: #f9f9fc;
+            font-weight: 600; color: #333; text-align: left;
+            min-width: 130px; max-width: 180px;
+        }
+        .cross-table .cell-booked {
+            background: #e8f5e9; color: #2e7d32; font-size: 0.9em;
+            cursor: default; line-height: 1.4;
+        }
+        .cross-table .cell-empty {
+            background: #fff; color: #ddd;
+        }
+        .cross-table .cell-unavailable {
+            background: #f5f5f5; color: #ccc;
+        }
+        .cross-table .summary-row td {
+            background: #f6f7fb; font-weight: 600; color: #555;
+        }
+        .cross-table .summary-col {
+            background: #f6f7fb !important; font-weight: 600; color: #555;
+        }
+
         /* ===== 分页 ===== */
         .pagination {
             display: flex; justify-content: center; gap: 6px;
@@ -260,8 +302,8 @@
             <div class="nav-item" data-page="teachers" onclick="switchPage('teachers')">
                 <span class="icon">👨‍🏫</span> 教师管理
             </div>
-            <div class="nav-item" data-page="logs" onclick="switchPage('logs')">
-                <span class="icon">📝</span> 操作日志
+            <div class="nav-item" data-page="students" onclick="switchPage('students')">
+                <span class="icon">👨‍🎓</span> 学生名册
             </div>
             <div style="border-top: 1px solid #2a2a4a; margin: 12px 0;"></div>
             <div class="nav-item" onclick="showQRCode()" style="color:#ffd93d;">
@@ -285,12 +327,8 @@
             <div class="page active" id="page-dashboard">
                 <div class="stats-grid" id="statsGrid"></div>
                 <div class="card">
-                    <div class="card-header"><h3>各老师预约情况</h3></div>
-                    <div id="teacherStatsChart"></div>
-                </div>
-                <div class="card">
-                    <div class="card-header"><h3>时段分布</h3></div>
-                    <div id="slotStatsChart"></div>
+                    <div class="card-header"><h3>预约总览（老师 × 时段）</h3></div>
+                    <div class="cross-table-wrapper" id="crossTableWrapper"></div>
                 </div>
             </div>
 
@@ -311,7 +349,7 @@
                                 <option value="1">有效预约</option>
                                 <option value="0">已取消</option>
                             </select>
-                            <button class="btn btn-success" onclick="exportAdminCSV()">📊 导出CSV</button>
+                            <button class="btn btn-success" onclick="exportAdminExcel()">📊 导出Excel</button>
                         </div>
                     </div>
                     <div id="bookingsTable"></div>
@@ -353,6 +391,61 @@
                     <div class="pagination" id="logsPagination"></div>
                 </div>
             </div>
+
+            <!-- ===== 学生名册 ===== -->
+            <div class="page" id="page-students">
+                <div class="card">
+                    <div class="card-header">
+                        <h3>学生名册 <span id="studentCount" style="font-weight:normal;color:#999;font-size:0.85em;"></span></h3>
+                        <div class="filters" style="gap:8px;">
+                            <button class="btn btn-primary" onclick="openStudentAddModal()">+ 添加学生</button>
+                            <button class="btn btn-success" onclick="openStudentBatchModal()">📋 批量导入</button>
+                            <button class="btn btn-danger" onclick="clearAllStudents()">🗑️ 清空名册</button>
+                        </div>
+                    </div>
+                    <div id="studentsTable"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ===== 添加学生弹窗 ===== -->
+<div class="modal-overlay" id="studentAddModal">
+    <div class="modal-box">
+        <h3>添加学生</h3>
+        <div class="form-row">
+            <label>学生姓名 *</label>
+            <input type="text" id="sName" placeholder="如: 张三">
+        </div>
+        <div class="form-row">
+            <label>班级（可选）</label>
+            <input type="text" id="sClass" placeholder="如: 高一1班">
+        </div>
+        <div class="form-actions">
+            <button class="btn btn-outline" onclick="closeStudentAddModal()">取消</button>
+            <button class="btn btn-primary" onclick="addStudent()">保存</button>
+        </div>
+    </div>
+</div>
+
+<!-- ===== 批量导入弹窗 ===== -->
+<div class="modal-overlay" id="studentBatchModal">
+    <div class="modal-box">
+        <h3>批量导入学生</h3>
+        <div class="form-row">
+            <label>请输入学生列表（每行一个学生，格式：姓名 或 姓名,班级）</label>
+            <textarea id="batchStudentInput" rows="12" style="width:100%;padding:12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.92em;font-family:monospace;resize:vertical;" placeholder="张三&#10;李四,高一1班&#10;王五,高一2班&#10;赵六"></textarea>
+        </div>
+        <div style="font-size:0.8em;color:#999;margin-bottom:12px;">
+            支持格式：<br>
+            • 每行一个姓名<br>
+            • 每行 "姓名,班级"（逗号分隔）<br>
+            • 已存在的学生会自动跳过
+        </div>
+        <div class="form-actions">
+            <button class="btn btn-outline" onclick="closeStudentBatchModal()">取消</button>
+            <button class="btn btn-success" onclick="batchImportStudents()">开始导入</button>
         </div>
     </div>
 </div>
@@ -380,13 +473,13 @@
         </div>
         <div class="form-row">
             <label>总名额</label>
-            <input type="number" id="tSlots" value="12" min="1" max="50">
+            <input type="number" id="tSlots" value="" min="1" max="50">
         </div>
         <div class="form-row">
             <label>限制时段（Java/日语老师勾选）</label>
-            <select id="tLimited">
-                <option value="0">否 — 全部时段 10:20-12:20</option>
-                <option value="1">是 — 仅 10:30-12:00</option>
+            <select id="tLimited" onchange="onLimitedChange()">
+                <option value="0">否 — 全部时段</option>
+                <option value="1">是 — 仅限部分时段</option>
             </select>
         </div>
         <div class="form-actions">
@@ -418,11 +511,36 @@
 
 <script>
 // ==================== 配置 ====================
-const API = window.location.origin + '/api';
+// 自动检测子路径部署（如 /ptc/admin/）
+const BASE_PATH = window.location.pathname.replace(/\/admin\/?.*$/, '').replace(/\/+$/, '');
+const API = window.location.origin + BASE_PATH + '/api';
 const MEETING_DATE = '2026-04-03';
 let adminToken = localStorage.getItem('ptc_admin_token') || '';
 let currentPage = 'dashboard';
 let searchTimer = null;
+
+// 时间段配置（从 API 动态加载）
+let cachedTimeSlots = null;
+async function loadTimeSlots() {
+    try {
+        const res = await fetch(`${API}/time-slots`);
+        const data = await res.json();
+        if (data.code === 0 && data.data) {
+            cachedTimeSlots = data.data;
+        }
+    } catch (e) {
+        console.warn('时间段配置加载失败:', e.message);
+    }
+}
+function getTimeSlotsAll() {
+    return cachedTimeSlots?.all || ['10:20-10:30','10:30-10:40','10:40-10:50','10:50-11:00','11:00-11:10','11:10-11:20','11:20-11:30','11:30-11:40','11:40-11:50','11:50-12:00','12:00-12:10','12:10-12:20'];
+}
+function getTimeSlotsLimited() {
+    return cachedTimeSlots?.limited || ['10:30-10:40','10:40-10:50','10:50-11:00','11:00-11:10','11:10-11:20','11:20-11:30','11:30-11:40','11:40-11:50','11:50-12:00'];
+}
+function getDefaultTotalSlots() {
+    return cachedTimeSlots?.default_total_slots || 12;
+}
 
 // ==================== API 封装 ====================
 async function adminFetch(path, options = {}) {
@@ -472,6 +590,7 @@ async function doLogin() {
         adminToken = data.data.token;
         localStorage.setItem('ptc_admin_token', adminToken);
         errEl.style.display = 'none';
+        await loadTimeSlots();
         showApp();
         loadDashboard();
     } catch (e) {
@@ -493,6 +612,7 @@ async function checkAuth() {
     if (!adminToken) { showLogin(); return; }
     try {
         await adminFetch('/admin/check');
+        await loadTimeSlots();
         showApp();
         loadDashboard();
     } catch (e) {
@@ -505,7 +625,7 @@ const pageTitles = {
     dashboard: '📊 数据总览',
     bookings: '📋 预约管理',
     teachers: '👨‍🏫 教师管理',
-    logs: '📝 操作日志'
+    students: '👨‍🎓 学生名册'
 };
 
 function switchPage(page) {
@@ -519,7 +639,7 @@ function switchPage(page) {
     if (page === 'dashboard') loadDashboard();
     else if (page === 'bookings') loadAdminBookings();
     else if (page === 'teachers') loadTeachers();
-    else if (page === 'logs') loadLogs();
+    else if (page === 'students') loadStudents();
 }
 
 // ==================== 仪表盘 ====================
@@ -544,52 +664,68 @@ async function loadDashboard() {
                 <div class="value">${data.total_capacity - data.total_bookings}</div>
                 <div class="sub">可预约</div>
             </div>
-            <div class="stat-card red">
-                <div class="label">已取消</div>
-                <div class="value">${data.total_cancelled}</div>
-                <div class="sub">取消的预约</div>
-            </div>
         `;
 
-        // 老师预约柱状图
-        const teacherChart = document.getElementById('teacherStatsChart');
-        teacherChart.innerHTML = data.teacher_stats.map(t => {
-            const pct = t.total_slots > 0 ? Math.round(t.booked_count / t.total_slots * 100) : 0;
-            return `
-                <div class="teacher-stat-row">
-                    <div class="teacher-stat-name">${t.name}</div>
-                    <div class="teacher-stat-bar">
-                        <div class="progress-bar">
-                            <div class="progress-fill" style="width: ${pct}%"></div>
-                        </div>
-                    </div>
-                    <div class="teacher-stat-num">${t.booked_count} / ${t.total_slots}</div>
-                </div>`;
-        }).join('');
+        // 老师×时段 二维交叉表格
+        const allSlots = getTimeSlotsAll();
+        const limitedSlots = getTimeSlotsLimited();
 
-        // 时段分布
-        const slotChart = document.getElementById('slotStatsChart');
-        const allSlots = ['10:20-10:30','10:30-10:40','10:40-10:50','10:50-11:00',
-            '11:00-11:10','11:10-11:20','11:20-11:30','11:30-11:40',
-            '11:40-11:50','11:50-12:00','12:00-12:10','12:10-12:20'];
-        const slotMap = {};
-        data.slot_stats.forEach(s => slotMap[s.time_slot] = s.count);
-        const maxSlot = Math.max(...Object.values(slotMap), 1);
+        // 构建 crossMap: { teacherId_timeSlot: { name, phone } }
+        const crossMap = {};
+        (data.cross_data || []).forEach(c => {
+            crossMap[`${c.teacher_id}_${c.time_slot}`] = { name: c.student_name, phone: c.phone || '' };
+        });
 
-        slotChart.innerHTML = allSlots.map(slot => {
-            const cnt = slotMap[slot] || 0;
-            const pct = Math.round(cnt / data.teacher_stats.length * 100);
-            return `
-                <div class="teacher-stat-row">
-                    <div class="teacher-stat-name" style="min-width:100px;font-size:0.85em;">${slot}</div>
-                    <div class="teacher-stat-bar">
-                        <div class="progress-bar">
-                            <div class="progress-fill" style="width: ${pct}%"></div>
-                        </div>
-                    </div>
-                    <div class="teacher-stat-num">${cnt} 人</div>
-                </div>`;
-        }).join('');
+        // 每个时段的合计
+        const slotTotals = {};
+        allSlots.forEach(s => slotTotals[s] = 0);
+        (data.cross_data || []).forEach(c => {
+            if (slotTotals[c.time_slot] !== undefined) slotTotals[c.time_slot]++;
+        });
+
+        let tableHtml = '<table class="cross-table"><thead><tr>';
+        tableHtml += '<th>老师 \\ 时段</th>';
+        allSlots.forEach(s => {
+            tableHtml += `<th>${s.split('-')[0]}<br><span style="font-weight:normal;color:#999;">${s.split('-')[1]}</span></th>`;
+        });
+        tableHtml += '<th class="summary-col">已约/总额</th>';
+        tableHtml += '</tr></thead><tbody>';
+
+        data.teacher_stats.forEach(t => {
+            const isLimited = t.total_slots < allSlots.length;
+            const availableSlots = isLimited ? limitedSlots : allSlots;
+            tableHtml += '<tr>';
+            tableHtml += `<td>${t.name}</td>`;
+            allSlots.forEach(slot => {
+                const key = `${t.id}_${slot}`;
+                const info = crossMap[key];
+                const isAvailable = availableSlots.includes(slot);
+                if (info) {
+                    const phoneTail = info.phone ? info.phone.slice(-4) : '';
+                    const phoneDisplay = phoneTail ? `<br><span style="color:#888;font-size:0.82em;">${info.phone}</span>` : '';
+                    tableHtml += `<td class="cell-booked" title="${info.name} ${info.phone}">${info.name}${phoneDisplay}</td>`;
+                } else if (!isAvailable) {
+                    tableHtml += `<td class="cell-unavailable">—</td>`;
+                } else {
+                    tableHtml += `<td class="cell-empty">·</td>`;
+                }
+            });
+            tableHtml += `<td class="summary-col">${t.booked_count} / ${t.total_slots}</td>`;
+            tableHtml += '</tr>';
+        });
+
+        // 合计行
+        tableHtml += '<tr class="summary-row">';
+        tableHtml += '<td>合计</td>';
+        allSlots.forEach(slot => {
+            const cnt = slotTotals[slot] || 0;
+            tableHtml += `<td>${cnt ? cnt + '人' : '-'}</td>`;
+        });
+        tableHtml += `<td>${data.total_bookings} / ${data.total_capacity}</td>`;
+        tableHtml += '</tr>';
+
+        tableHtml += '</tbody></table>';
+        document.getElementById('crossTableWrapper').innerHTML = tableHtml;
 
         // 更新预约管理的老师筛选下拉
         const select = document.getElementById('filterTeacher');
@@ -646,19 +782,26 @@ async function loadAdminBookings() {
         tableEl.innerHTML = `<table>
             <thead><tr>
                 <th>ID</th><th>老师</th><th>学生</th><th>电话</th>
-                <th>时段</th><th>教室</th><th>备注</th><th>状态</th><th>操作</th>
+                <th>时段</th><th>教室</th><th>预约时间</th><th>取消时间</th><th>取消者</th><th>状态</th><th>操作</th>
             </tr></thead>
-            <tbody>${data.list.map(b => `<tr>
+            <tbody>${data.list.map(b => {
+                const bookedTime = b.booked_at ? new Date(b.booked_at).toLocaleString('zh-CN') : '-';
+                const cancelledTime = b.cancelled_at ? new Date(b.cancelled_at).toLocaleString('zh-CN') : '-';
+                const cancelledBy = b.cancelled_by === 'parent' ? '家长' : b.cancelled_by === 'admin' ? '管理员' : '-';
+                return `<tr>
                 <td>${b.id}</td>
                 <td>${b.teacher_name}</td>
                 <td>${b.student_name}</td>
                 <td>${b.phone}</td>
                 <td>${b.time_slot}</td>
                 <td>${b.venue}</td>
-                <td style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${b.notes || ''}">${b.notes || '-'}</td>
+                <td style="white-space:nowrap;font-size:0.82em;">${bookedTime}</td>
+                <td style="white-space:nowrap;font-size:0.82em;">${cancelledTime}</td>
+                <td>${cancelledBy}</td>
                 <td><span class="status-badge ${b.status === 1 ? 'status-active' : 'status-cancelled'}">${b.status === 1 ? '有效' : '已取消'}</span></td>
                 <td>${b.status === 1 ? `<button class="btn btn-danger btn-sm" onclick="adminCancel(${b.id},'${b.teacher_name}','${b.student_name}')">取消</button>` : '-'}</td>
-            </tr>`).join('')}</tbody>
+            </tr>`;
+            }).join('')}</tbody>
         </table>`;
 
         renderPagination('bookingsPagination', data, (p) => { bookingsPage = p; loadAdminBookings(); });
@@ -678,20 +821,94 @@ async function adminCancel(id, teacher, student) {
     }
 }
 
-async function exportAdminCSV() {
+async function exportAdminExcel() {
     try {
-        const rows = await adminFetch(`/admin/export?date=${MEETING_DATE}`);
-        if (!rows.length) { alert('暂无数据'); return; }
-        const header = ['序号','老师','教室','学生','电话','日期','时段','备注','预约时间'];
-        const csv = '\uFEFF' + [header, ...rows.map((r,i) => [
-            i+1, r.teacher_name, r.venue, r.student_name, r.phone,
-            r.date, r.time_slot, r.notes||'', r.created_at
-        ])].map(row => row.map(c => `"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n');
-        const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = `PTC预约记录_${MEETING_DATE}.csv`;
-        a.click();
+        // 拿 dashboard 数据（交叉表用）
+        const dashRes = await adminFetch(`/admin/dashboard?date=${MEETING_DATE}`);
+        if (!dashRes || !dashRes.teacher_stats) { alert('暂无数据'); return; }
+
+        const allSlots = getTimeSlotsAll();
+        const limitedSlots = getTimeSlotsLimited();
+        const teachers = dashRes.teacher_stats;
+        const crossData = dashRes.cross_data || [];
+
+        // 构建 crossMap: teacherId_timeSlot → { name, phone }
+        const crossMap = {};
+        crossData.forEach(c => {
+            crossMap[`${c.teacher_id}_${c.time_slot}`] = { name: c.student_name, phone: c.phone || '' };
+        });
+
+        // 每个时段的合计
+        const slotTotals = {};
+        allSlots.forEach(s => slotTotals[s] = 0);
+        crossData.forEach(c => { if (slotTotals[c.time_slot] !== undefined) slotTotals[c.time_slot]++; });
+
+        const wb = XLSX.utils.book_new();
+
+        // ===== Sheet 1: 预约总览（老师 × 时段）=====
+        const overviewHeader = ['老师 \\ 时段', ...allSlots, '已约/总额'];
+        const overviewData = [];
+        teachers.forEach(t => {
+            const isLimited = t.total_slots < allSlots.length;
+            const availableSlots = isLimited ? limitedSlots : allSlots;
+            const row = [t.name];
+            allSlots.forEach(slot => {
+                const info = crossMap[`${t.id}_${slot}`];
+                if (info) {
+                    row.push(info.name + (info.phone ? '\n' + info.phone : ''));
+                } else if (!availableSlots.includes(slot)) {
+                    row.push('—');
+                } else {
+                    row.push('');
+                }
+            });
+            row.push(`${t.booked_count} / ${t.total_slots}`);
+            overviewData.push(row);
+        });
+        // 合计行
+        const totalRow = ['合计'];
+        allSlots.forEach(slot => {
+            const cnt = slotTotals[slot] || 0;
+            totalRow.push(cnt ? cnt + '人' : '-');
+        });
+        totalRow.push(`${dashRes.total_bookings} / ${dashRes.total_capacity}`);
+        overviewData.push(totalRow);
+
+        const wsOverview = XLSX.utils.aoa_to_sheet([overviewHeader, ...overviewData]);
+        // 列宽：老师名 + 每个时段 + 汇总
+        wsOverview['!cols'] = [
+            {wch: 22},
+            ...allSlots.map(() => ({wch: 16})),
+            {wch: 12}
+        ];
+        XLSX.utils.book_append_sheet(wb, wsOverview, '预约总览');
+
+        // ===== 每个老师一个 Sheet =====
+        teachers.forEach(t => {
+            const isLimited = t.total_slots < allSlots.length;
+            const availableSlots = isLimited ? limitedSlots : allSlots;
+            const sheetData = [['时段', '学生', '电话', '状态']];
+            allSlots.forEach(slot => {
+                const info = crossMap[`${t.id}_${slot}`];
+                const isAvailable = availableSlots.includes(slot);
+                if (info) {
+                    sheetData.push([slot, info.name, info.phone, '已预约']);
+                } else if (!isAvailable) {
+                    sheetData.push([slot, '', '', '不可用']);
+                } else {
+                    sheetData.push([slot, '', '', '空闲']);
+                }
+            });
+            // 汇总行
+            sheetData.push([]);
+            sheetData.push(['合计', `已约 ${t.booked_count} / 总额 ${t.total_slots}`]);
+            const ws = XLSX.utils.aoa_to_sheet(sheetData);
+            ws['!cols'] = [{wch: 14}, {wch: 18}, {wch: 15}, {wch: 8}];
+            const sheetName = t.name.replace(/[\\/*?:\[\]]/g, '').substring(0, 31);
+            XLSX.utils.book_append_sheet(wb, ws, sheetName);
+        });
+
+        XLSX.writeFile(wb, `PTC预约记录_${MEETING_DATE}.xlsx`);
     } catch (e) {
         alert('导出失败: ' + e.message);
     }
@@ -726,6 +943,13 @@ async function loadTeachers() {
     }
 }
 
+function onLimitedChange() {
+    const limited = document.getElementById('tLimited').value === '1';
+    const slotsInput = document.getElementById('tSlots');
+    const limCount = getTimeSlotsLimited().length;
+    slotsInput.value = limited ? limCount : getDefaultTotalSlots();
+}
+
 function openTeacherModal(data) {
     document.getElementById('teacherModalTitle').textContent = data ? '编辑教师' : '添加教师';
     document.getElementById('editTeacherId').value = data ? data.id : '';
@@ -733,8 +957,14 @@ function openTeacherModal(data) {
     document.getElementById('tSubjects').value = data ? data.subjects : '';
     document.getElementById('tVenue').value = data ? data.venue : '';
     document.getElementById('tIcon').value = data ? data.icon : '👨‍🏫';
-    document.getElementById('tSlots').value = data ? data.total_slots : 12;
-    document.getElementById('tLimited').value = data ? (data.limited_slots ? '1' : '0') : '0';
+    document.getElementById('tSlots').value = data ? data.total_slots : getDefaultTotalSlots();
+    // 动态更新时段描述
+    const limitedSel = document.getElementById('tLimited');
+    const allSlots = getTimeSlotsAll();
+    const limSlots = getTimeSlotsLimited();
+    limitedSel.options[0].textContent = `否 — 全部时段 ${allSlots[0]?.split('-')[0] || ''}~${allSlots[allSlots.length-1]?.split('-')[1] || ''}`;
+    limitedSel.options[1].textContent = `是 — 仅 ${limSlots[0]?.split('-')[0] || ''}~${limSlots[limSlots.length-1]?.split('-')[1] || ''}`;
+    limitedSel.value = data ? (data.limited_slots ? '1' : '0') : '0';
     document.getElementById('teacherModal').classList.add('active');
 }
 
@@ -753,7 +983,7 @@ async function saveTeacher() {
         subjects: document.getElementById('tSubjects').value,
         venue: document.getElementById('tVenue').value,
         icon: document.getElementById('tIcon').value,
-        total_slots: parseInt(document.getElementById('tSlots').value) || 12,
+        total_slots: parseInt(document.getElementById('tSlots').value) || getDefaultTotalSlots(),
         limited_slots: document.getElementById('tLimited').value === '1'
     };
     if (!body.name || !body.subjects || !body.venue) {
@@ -862,8 +1092,8 @@ function showQRCode() {
     const qrDiv = document.getElementById('qrcode');
     const urlInput = document.getElementById('qrUrlInput');
 
-    // 获取前端预约页的URL（去掉 /admin/ 后缀）
-    const shareUrl = window.location.origin + '/';
+    // 获取前端预约页的URL（基于子路径部署）
+    const shareUrl = window.location.origin + BASE_PATH + '/';
     urlInput.value = shareUrl;
     qrDiv.innerHTML = '';
 
@@ -907,6 +1137,123 @@ document.getElementById('teacherModal').addEventListener('click', function(e) {
 
 document.getElementById('qrModal').addEventListener('click', function(e) {
     if (e.target === this) closeQRModal();
+});
+
+// ==================== 学生名册管理 ====================
+async function loadStudents() {
+    try {
+        const rows = await adminFetch('/admin/students');
+        document.getElementById('studentCount').textContent = `（共 ${rows.length} 人）`;
+        const tableEl = document.getElementById('studentsTable');
+        if (!rows.length) {
+            tableEl.innerHTML = '<div class="empty-state">暂无学生，请添加或批量导入</div>';
+            return;
+        }
+        tableEl.innerHTML = `<table>
+            <thead><tr>
+                <th>ID</th><th>姓名</th><th>班级</th><th>操作</th>
+            </tr></thead>
+            <tbody>${rows.map(s => `<tr>
+                <td>${s.id}</td>
+                <td><strong>${s.name}</strong></td>
+                <td>${s.class_name || '-'}</td>
+                <td><button class="btn btn-danger btn-sm" onclick="deleteStudent(${s.id},'${s.name.replace(/'/g, "\\'")}')">删除</button></td>
+            </tr>`).join('')}</tbody>
+        </table>`;
+    } catch (e) {
+        console.error('加载学生名册失败:', e);
+    }
+}
+
+function openStudentAddModal() {
+    document.getElementById('sName').value = '';
+    document.getElementById('sClass').value = '';
+    document.getElementById('studentAddModal').classList.add('active');
+    setTimeout(() => document.getElementById('sName').focus(), 200);
+}
+
+function closeStudentAddModal() {
+    document.getElementById('studentAddModal').classList.remove('active');
+}
+
+async function addStudent() {
+    const name = document.getElementById('sName').value.trim();
+    const class_name = document.getElementById('sClass').value.trim();
+    if (!name) { alert('请输入学生姓名'); return; }
+    try {
+        await adminFetch('/admin/students', {
+            method: 'POST',
+            body: JSON.stringify({ name, class_name })
+        });
+        closeStudentAddModal();
+        loadStudents();
+    } catch (e) {
+        alert('添加失败: ' + e.message);
+    }
+}
+
+function openStudentBatchModal() {
+    document.getElementById('batchStudentInput').value = '';
+    document.getElementById('studentBatchModal').classList.add('active');
+}
+
+function closeStudentBatchModal() {
+    document.getElementById('studentBatchModal').classList.remove('active');
+}
+
+async function batchImportStudents() {
+    const text = document.getElementById('batchStudentInput').value.trim();
+    if (!text) { alert('请输入学生列表'); return; }
+
+    const lines = text.split('\n').filter(l => l.trim());
+    const students = lines.map(line => {
+        const parts = line.split(/[,，\t]/).map(s => s.trim());
+        return { name: parts[0], class_name: parts[1] || '' };
+    }).filter(s => s.name);
+
+    if (!students.length) { alert('未识别到有效学生'); return; }
+
+    try {
+        await adminFetch('/admin/students/batch', {
+            method: 'POST',
+            body: JSON.stringify({ students })
+        });
+        alert(`导入完成！共处理 ${students.length} 条记录`);
+        closeStudentBatchModal();
+        loadStudents();
+    } catch (e) {
+        alert('导入失败: ' + e.message);
+    }
+}
+
+async function deleteStudent(id, name) {
+    if (!confirm(`确认删除学生「${name}」？`)) return;
+    try {
+        await adminFetch(`/admin/students/${id}`, { method: 'DELETE' });
+        loadStudents();
+    } catch (e) {
+        alert('删除失败: ' + e.message);
+    }
+}
+
+async function clearAllStudents() {
+    if (!confirm('⚠️ 确认清空全部学生名册？此操作不可恢复！')) return;
+    if (!confirm('再次确认：清空后所有学生数据将被删除。是否继续？')) return;
+    try {
+        await adminFetch('/admin/students', { method: 'DELETE' });
+        alert('已清空全部学生名册');
+        loadStudents();
+    } catch (e) {
+        alert('清空失败: ' + e.message);
+    }
+}
+
+// 弹窗遮罩关闭
+document.getElementById('studentAddModal').addEventListener('click', function(e) {
+    if (e.target === this) closeStudentAddModal();
+});
+document.getElementById('studentBatchModal').addEventListener('click', function(e) {
+    if (e.target === this) closeStudentBatchModal();
 });
 
 // ==================== 初始化 ====================
