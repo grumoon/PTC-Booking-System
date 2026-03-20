@@ -65,7 +65,44 @@ async function initDB() {
     `);
     console.log('✅ audit_logs 表已创建');
 
-    // 4. 插入初始老师数据（先清空再插入）
+    // 4. 创建 admin_config 表（系统配置，包含管理员密码）
+    await conn.execute(`
+      CREATE TABLE IF NOT EXISTS admin_config (
+        config_key VARCHAR(50) PRIMARY KEY COMMENT '配置键',
+        config_value VARCHAR(500) NOT NULL COMMENT '配置值',
+        description VARCHAR(200) COMMENT '说明',
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='系统配置表'
+    `);
+    console.log('✅ admin_config 表已创建');
+
+    // 插入默认管理员密码（明文存储）
+    const [configExists] = await conn.execute(
+      "SELECT COUNT(*) as cnt FROM admin_config WHERE config_key = 'admin_password'"
+    );
+    if (configExists[0].cnt === 0) {
+      await conn.execute(
+        "INSERT INTO admin_config (config_key, config_value, description) VALUES ('admin_password', 'ptc2026admin', '管理员登录密码')"
+      );
+      console.log('✅ 已设置默认管理员密码');
+    } else {
+      console.log('ℹ️  管理员密码已存在，跳过');
+    }
+
+    // 插入默认会议日期
+    const [dateExists] = await conn.execute(
+      "SELECT COUNT(*) as cnt FROM admin_config WHERE config_key = 'meeting_date'"
+    );
+    if (dateExists[0].cnt === 0) {
+      await conn.execute(
+        "INSERT INTO admin_config (config_key, config_value, description) VALUES ('meeting_date', '2026-04-03', '家长会日期')"
+      );
+      console.log('✅ 已设置默认会议日期');
+    } else {
+      console.log('ℹ️  会议日期已存在，跳过');
+    }
+
+    // 5. 插入初始老师数据（先清空再插入）
     const [existing] = await conn.execute('SELECT COUNT(*) as cnt FROM teachers');
     if (existing[0].cnt === 0) {
       await conn.execute(`

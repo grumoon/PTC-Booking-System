@@ -7,7 +7,6 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>家长会预约</title>
-    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         html, body { -webkit-overflow-scrolling: touch; }
@@ -34,7 +33,6 @@
             .time-slots { grid-template-columns: repeat(3, 1fr); gap: 6px; }
             .time-slot { font-size: 0.8em; padding: 8px 4px; }
             .book-button { padding: 10px; font-size: 0.92em; }
-            .toolbar-btn { padding: 8px 14px; font-size: 0.88em; }
             .modal-content { width: 95%; max-height: 85vh; padding: 20px 16px; }
             .booking-item { flex-direction: column; }
             .cancel-btn { margin-top: 10px; width: 100%; margin-left: 0; }
@@ -63,23 +61,6 @@
         .detail-section h3 { color: #667eea; margin-bottom: 10px; font-size: 1.05em; }
         .detail-section ul { padding-left: 18px; margin-top: 8px; }
         .detail-section li { margin-bottom: 6px; }
-
-        /* Toolbar */
-        .toolbar {
-            display: none; gap: 8px; justify-content: center;
-            margin-bottom: 16px; flex-wrap: wrap;
-        }
-        .toolbar.visible { display: flex; }
-        .toolbar-btn {
-            padding: 10px 18px; border: none; border-radius: 20px;
-            font-size: 0.9em; font-weight: bold; cursor: pointer;
-            transition: opacity 0.2s; box-shadow: 0 2px 6px rgba(0,0,0,0.15);
-        }
-        .toolbar-btn:active { transform: scale(0.97); }
-        .toolbar-btn:hover { opacity: 0.88; }
-        .btn-export { background: #4CAF50; color: white; }
-        .btn-qr { background: white; color: #667eea; }
-        .btn-edit { background: #ff9800; color: white; }
 
         /* Teacher Grid */
         .teacher-grid {
@@ -207,40 +188,6 @@
         .cancel-btn:active { transform: scale(0.95); }
         .no-bookings { color: #999; text-align: center; padding: 16px; font-size: 0.9em; }
 
-        /* QR Modal */
-        .qr-modal {
-            display: none; position: fixed; inset: 0;
-            background: rgba(0,0,0,0.6); justify-content: center;
-            align-items: center; z-index: 2000;
-        }
-        .qr-modal.active { display: flex; }
-        .qr-box {
-            background: white; border-radius: 18px; padding: 28px 24px;
-            text-align: center; max-width: 320px; width: 92%;
-            animation: popIn 0.3s ease-out;
-        }
-        @keyframes popIn {
-            from { transform: scale(0.8); opacity: 0; }
-            to { transform: scale(1); opacity: 1; }
-        }
-        .qr-box h3 { color: #333; margin-bottom: 4px; font-size: 1.15em; }
-        .qr-box p { color: #888; font-size: 0.85em; margin-bottom: 14px; }
-        #qrcode { display: flex; justify-content: center; margin-bottom: 12px; }
-        .qr-tip { font-size: 0.78em; color: #999; margin-top: 6px; line-height: 1.5; }
-        .qr-close { margin-top: 14px; padding: 10px 26px; background: #667eea; color: white; border: none; border-radius: 22px; cursor: pointer; font-size: 0.98em; box-shadow: 0 3px 8px rgba(102,126,234,0.35); }
-        .qr-close:active { transform: scale(0.96); }
-
-        /* 圆形Logo样式 */
-        .qr-logo {
-            width: 100px; height: 100px; border-radius: 50%;
-            overflow: hidden; margin: 0 auto 16px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            display: flex; align-items: center; justify-content: center;
-            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
-        }
-        .qr-logo img { width: 100%; height: 100%; object-fit: cover; display: block; }
-        .qr-logo-text { font-size: 3em; color: white; }
-
         /* 浮动详情按钮 */
         .share-fab {
             position: fixed; bottom: 20px; right: 20px;
@@ -279,17 +226,10 @@
 <div class="container">
 
     <div class="header">
-        <h1 id="adminTrigger" style="cursor:default;">📚 威睿达思（深圳）家长会</h1>
+        <h1>📚 威睿达思（深圳）家长会</h1>
         <!-- VERSION: v3-self-hosted-20260320 -->
-        <div class="date-info" id="meetingDateDisplay" style="cursor:pointer;" title="点击修改日期">📅 4月3日（周五）9:00–12:20</div>
-        <p id="meetingDesc" style="cursor:pointer;" title="点击修改介绍">家长会分两个阶段进行，详情点击右下角按钮查看</p>
-    </div>
-
-    <!-- 管理员工具栏 -->
-    <div class="toolbar" id="adminToolbar">
-        <button class="toolbar-btn btn-qr" onclick="showQR()">📱 分享二维码</button>
-        <button class="toolbar-btn btn-export" onclick="exportCSV()">📊 导出数据</button>
-        <button class="toolbar-btn btn-edit" onclick="editTeachers()">✏️ 编辑教师</button>
+        <div class="date-info" id="meetingDateDisplay">📅 4月3日（周五）9:00–12:20</div>
+        <p id="meetingDesc">家长会分两个阶段进行，详情点击右下角按钮查看</p>
     </div>
 
     <!-- 浮动详情按钮 -->
@@ -334,21 +274,6 @@
             </div>
             <button type="submit" class="confirm-btn">✅ 确认预约</button>
         </form>
-    </div>
-</div>
-
-<!-- QR Modal -->
-<div class="qr-modal" id="qrModal">
-    <div class="qr-box">
-        <div class="qr-logo">
-            <img src="logo.png" alt="威睿达思logo" id="schoolLogo" onerror="this.style.display='none'; this.parentElement.querySelector('.qr-logo-text').style.display='block';">
-            <div class="qr-logo-text" style="display:none;">📱</div>
-        </div>
-        <h3>微信扫码预约</h3>
-        <p>家长用微信扫一扫</p>
-        <div id="qrcode"></div>
-        <div class="qr-tip">微信扫一扫，分享给其他家长</div>
-        <button class="qr-close" onclick="closeQR()">关闭</button>
     </div>
 </div>
 
@@ -672,87 +597,22 @@ async function cancelBooking(id) {
     const booking = bookings.find(b => b.id === id);
     if (!booking) return;
 
-    if (isAdminMode()) {
-        if (!confirm(`确定要取消这个预约吗？\n${booking.teacherName} — ${booking.studentName} — ${booking.timeSlot}`)) return;
-        // 管理员模式直接取消
-        isLoading = true;
-        showToast('⏳ 正在取消...');
-        try {
-            await apiDelete(`/bookings/${id}?admin=true`, {});
-            bookings = bookings.filter(b => b.id !== id);
-            renderTeachers();
-            renderMyBookings();
-            showToast('✅ 已取消预约');
-        } catch (e) {
-            showToast('❌ ' + (e.message || '取消失败'));
-            await loadBookings();
-            renderTeachers();
-            renderMyBookings();
-        }
-        isLoading = false;
-    } else {
-        const inputPhone = prompt(`请输入预约时填写的手机号以验证身份：\n（${booking.teacherName} — ${booking.studentName} — ${booking.timeSlot}）`);
-        if (inputPhone === null) return;
+    const inputPhone = prompt(`请输入预约时填写的手机号以验证身份：\n（${booking.teacherName} — ${booking.studentName} — ${booking.timeSlot}）`);
+    if (inputPhone === null) return;
 
-        isLoading = true;
-        showToast('⏳ 正在取消...');
-        try {
-            await apiDelete(`/bookings/${id}`, { phone: inputPhone.trim() });
-            bookings = bookings.filter(b => b.id !== id);
-            renderTeachers();
-            renderMyBookings();
-            showToast('✅ 已取消预约');
-        } catch (e) {
-            showToast('❌ ' + (e.message || '取消失败'));
-        }
-        isLoading = false;
-    }
-}
-
-// ==================== 导出 CSV ====================
-function exportCSV() {
-    if (!bookings.length) {
-        showToast('暂无预约数据可导出');
-        return;
-    }
-    const header = ['序号', '老师', '地点', '学生姓名', '联系电话', '日期', '时间段', '备注'];
-    const rows = bookings
-        .sort((a, b) => a.timeSlot.localeCompare(b.timeSlot))
-        .map((b, i) => [
-            i + 1, b.teacherName, b.venue, b.studentName, b.phone,
-            b.date, b.timeSlot, b.notes || ''
-        ]);
-    const csv = '\uFEFF' + [header, ...rows]
-        .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
-        .join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `家长会预约记录_${MEETING_DATE}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-    showToast('已导出数据到 CSV');
-}
-
-// ==================== 二维码 ====================
-function showQR() {
-    const modal = document.getElementById('qrModal');
-    const qrDiv = document.getElementById('qrcode');
-    qrDiv.innerHTML = '';
+    isLoading = true;
+    showToast('⏳ 正在取消...');
     try {
-        new QRCode(qrDiv, {
-            text: window.location.href,
-            width: 180, height: 180,
-            colorDark: '#333333', colorLight: '#ffffff',
-            correctLevel: QRCode.CorrectLevel.H
-        });
-    } catch(e) {
-        qrDiv.innerHTML = '<div style="padding:16px;color:#666;font-size:0.85em;">需要网络加载二维码库</div>';
+        await apiDelete(`/bookings/${id}`, { phone: inputPhone.trim() });
+        bookings = bookings.filter(b => b.id !== id);
+        renderTeachers();
+        renderMyBookings();
+        showToast('✅ 已取消预约');
+    } catch (e) {
+        showToast('❌ ' + (e.message || '取消失败'));
     }
-    modal.classList.add('active');
+    isLoading = false;
 }
-function closeQR() { document.getElementById('qrModal').classList.remove('active'); }
 
 function openDetailModal() { document.getElementById('detailModal').classList.add('active'); }
 function closeDetailModal() { document.getElementById('detailModal').classList.remove('active'); }
@@ -774,107 +634,14 @@ function showToast(msg) {
     }, 2800);
 }
 
-// ==================== 管理员入口 ====================
-let clickCount = 0;
-const adminTrigger = document.getElementById('adminTrigger');
-if (adminTrigger) {
-    adminTrigger.addEventListener('click', () => {
-        clickCount++;
-        if (clickCount >= 10) {
-            const toolbar = document.getElementById('adminToolbar');
-            if (toolbar) {
-                toolbar.style.display = toolbar.style.display === 'none' ? 'flex' : 'none';
-                showToast(toolbar.style.display === 'none' ? '已隐藏管理员按钮' : '已显示管理员按钮');
-            }
-            clickCount = 0;
-        }
-    });
-}
-
-function isAdminMode() {
-    const toolbar = document.getElementById('adminToolbar');
-    return toolbar && toolbar.style.display !== 'none';
-}
-
-// 管理员编辑功能
-document.getElementById('meetingDateDisplay').addEventListener('click', () => {
-    if (!isAdminMode()) return;
-    const newDate = prompt('请输入新的日期格式，如：4月3日（周五）9:00–11:00', '4月3日（周五）10:20–12:20');
-    if (newDate) {
-        document.getElementById('meetingDateDisplay').textContent = '📅 ' + newDate;
-        localStorage.setItem('meetingDate', newDate);
-        showToast('日期已更新');
-    }
-});
-
-document.getElementById('meetingDesc').addEventListener('click', () => {
-    if (!isAdminMode()) return;
-    const newDesc = prompt('请输入新的介绍文字', '每10分钟一个，共12个时段');
-    if (newDesc) {
-        document.getElementById('meetingDesc').textContent = newDesc;
-        localStorage.setItem('meetingDesc', newDesc);
-        showToast('介绍已更新');
-    }
-});
-
-function editTeachers() {
-    if (!isAdminMode()) return;
-    const teachersJson = JSON.stringify(teachers, null, 2);
-    const modal = document.createElement('div');
-    modal.className = 'modal active';
-    modal.id = 'editTeachersModal';
-    modal.innerHTML = `
-        <div class="modal-content" style="max-width:700px;">
-            <div class="modal-header">
-                <h2>✏️ 编辑教师信息</h2>
-                <button class="close-btn" onclick="closeEditModal()">×</button>
-            </div>
-            <div class="form-group">
-                <label>教师配置（JSON格式，可直接修改）</label>
-                <textarea id="teachersEditor" rows="15" style="font-family:monospace;font-size:0.85em;">${teachersJson}</textarea>
-            </div>
-            <div class="form-group">
-                <button class="confirm-btn" onclick="saveTeachers()">💾 保存修改</button>
-            </div>
-        </div>
-    `;
-    document.body.appendChild(modal);
-}
-
-function closeEditModal() {
-    const modal = document.getElementById('editTeachersModal');
-    if (modal) modal.remove();
-}
-
-function saveTeachers() {
-    try {
-        const editor = document.getElementById('teachersEditor');
-        if (!editor) { alert('找不到编辑器'); return; }
-        const newTeachers = JSON.parse(editor.value);
-        if (!Array.isArray(newTeachers)) throw new Error('必须是数组');
-        teachers = newTeachers;
-        renderTeachers();
-        showToast('✅ 教师信息已更新（仅当前设备生效）');
-        closeEditModal();
-    } catch (e) {
-        alert('❌ 格式错误：' + e.message);
-    }
-}
-
 // 点击遮罩关闭
 document.getElementById('bookingModal').addEventListener('click', function(e) { if (e.target === this) closeModal(); });
-document.getElementById('qrModal').addEventListener('click', function(e) { if (e.target === this) closeQR(); });
 const detailModal = document.getElementById('detailModal');
 if (detailModal) {
     detailModal.addEventListener('click', function(e) { if (e.target === this) closeDetailModal(); });
 }
 
 // ==================== 初始化 ====================
-const savedDate = localStorage.getItem('meetingDate');
-if (savedDate) { document.getElementById('meetingDateDisplay').textContent = '📅 ' + savedDate; }
-const savedDesc = localStorage.getItem('meetingDesc');
-if (savedDesc) { document.getElementById('meetingDesc').textContent = savedDesc; }
-
 async function init() {
     showToast('🔄 正在加载数据...');
     try {
