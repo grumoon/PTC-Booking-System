@@ -1,0 +1,894 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="format-detection" content="telephone=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>家长会预约</title>
+    <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        html, body { -webkit-overflow-scrolling: touch; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 10px;
+            padding-bottom: 60px;
+        }
+        .container { max-width: 1200px; margin: 0 auto; }
+
+        /* 微信优化 */
+        @media screen and (max-width: 768px) {
+            body { padding: 6px; padding-bottom: 70px; }
+            .container { padding: 0; }
+            .teacher-grid { grid-template-columns: 1fr 1fr; gap: 10px; }
+            .teacher-card { padding: 14px; }
+            .teacher-icon { font-size: 2em; }
+            .teacher-name { font-size: 1em; }
+            .teacher-subject { font-size: 0.78em; }
+            .teacher-venue { font-size: 0.72em; }
+            .slots-count { font-size: 1.4em; }
+            .time-slots { grid-template-columns: repeat(3, 1fr); gap: 6px; }
+            .time-slot { font-size: 0.8em; padding: 8px 4px; }
+            .book-button { padding: 10px; font-size: 0.92em; }
+            .toolbar-btn { padding: 8px 14px; font-size: 0.88em; }
+            .modal-content { width: 95%; max-height: 85vh; padding: 20px 16px; }
+            .booking-item { flex-direction: column; }
+            .cancel-btn { margin-top: 10px; width: 100%; margin-left: 0; }
+            .detail-section { font-size: 0.83em; padding: 14px; }
+            .detail-section h3 { font-size: 1em; }
+            .detail-section ul { padding-left: 14px; }
+        }
+        @media screen and (max-width: 400px) {
+            .teacher-grid { grid-template-columns: 1fr; }
+            .time-slots { grid-template-columns: repeat(2, 1fr); }
+        }
+
+        /* Header */
+        .header { text-align: center; color: white; margin-bottom: 16px; padding-top: 4px; }
+        .header h1 { font-size: 1.4em; margin-bottom: 8px; line-height: 1.3; }
+        .header .date-info { font-size: 0.88em; font-weight: bold; background: rgba(255,255,255,0.25); display: inline-block; padding: 5px 12px; border-radius: 14px; margin-bottom: 10px; }
+        .header p { font-size: 0.82em; opacity: 0.85; line-height: 1.6; max-width: 90%; margin: 0 auto; }
+        .detail-section {
+            background: rgba(255,255,255,0.95); color: #333;
+            border-radius: 12px; padding: 16px 18px;
+            margin: 0 auto; max-width: 90%;
+            text-align: left; line-height: 1.8;
+            font-size: 0.87em;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        .detail-section h3 { color: #667eea; margin-bottom: 10px; font-size: 1.05em; }
+        .detail-section ul { padding-left: 18px; margin-top: 8px; }
+        .detail-section li { margin-bottom: 6px; }
+
+        /* Toolbar */
+        .toolbar {
+            display: none; gap: 8px; justify-content: center;
+            margin-bottom: 16px; flex-wrap: wrap;
+        }
+        .toolbar.visible { display: flex; }
+        .toolbar-btn {
+            padding: 10px 18px; border: none; border-radius: 20px;
+            font-size: 0.9em; font-weight: bold; cursor: pointer;
+            transition: opacity 0.2s; box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+        }
+        .toolbar-btn:active { transform: scale(0.97); }
+        .toolbar-btn:hover { opacity: 0.88; }
+        .btn-export { background: #4CAF50; color: white; }
+        .btn-qr { background: white; color: #667eea; }
+        .btn-edit { background: #ff9800; color: white; }
+
+        /* Teacher Grid */
+        .teacher-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 14px;
+            margin-bottom: 24px;
+        }
+        .teacher-card {
+            background: white; border-radius: 14px; padding: 18px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.08);
+            transition: transform 0.25s;
+        }
+        .teacher-icon { font-size: 2.2em; text-align: center; margin-bottom: 8px; }
+        .teacher-name { font-size: 1.1em; font-weight: bold; color: #333; margin-bottom: 3px; }
+        .teacher-subject { color: #666; font-size: 0.82em; margin-bottom: 3px; line-height: 1.5; }
+        .teacher-venue { font-size: 0.78em; color: #999; margin-bottom: 10px; }
+        .teacher-slots { background: #f5f5f5; padding: 9px; border-radius: 8px; margin-bottom: 10px; }
+        .slots-title { font-size: 0.78em; color: #666; }
+        .slots-count { font-size: 1.6em; font-weight: bold; color: #667eea; }
+        .book-button {
+            width: 100%; padding: 11px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white; border: none; border-radius: 22px;
+            font-size: 0.95em; font-weight: bold; cursor: pointer;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.35);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .book-button:active { transform: scale(0.96); }
+        .book-button.full { background: #ccc; box-shadow: none; cursor: not-allowed; }
+
+        /* Modal */
+        .modal {
+            display: none; position: fixed; inset: 0;
+            background: rgba(0,0,0,0.5); justify-content: center;
+            align-items: center; z-index: 1000;
+        }
+        .modal.active { display: flex; }
+        .modal-content {
+            background: white; border-radius: 16px; padding: 24px;
+            max-width: 500px; width: 94%; max-height: 88vh; overflow-y: auto;
+            animation: slideIn 0.25s ease-out;
+        }
+        @keyframes slideIn {
+            from { transform: translateY(20px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        .modal-header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 16px; padding-bottom: 12px; border-bottom: 2px solid #f0f0f0;
+        }
+        .modal-header h2 { color: #333; font-size: 1.3em; }
+        .close-btn { background: none; border: none; font-size: 1.8em; color: #aaa; cursor: pointer; line-height: 1; padding: 0 8px; }
+        .close-btn:active { color: #333; }
+
+        .form-group { margin-bottom: 14px; }
+        .form-group label { display: block; margin-bottom: 6px; color: #333; font-weight: bold; font-size: 0.9em; }
+        .form-group input, .form-group select, .form-group textarea {
+            width: 100%; padding: 11px; border: 1.5px solid #e0e0e0;
+            border-radius: 10px; font-size: 1em; transition: border-color 0.2s; -webkit-appearance: none;
+        }
+        .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
+            outline: none; border-color: #667eea; border-width: 2px; padding: 10px;
+        }
+
+        /* Time Slots */
+        .time-slots { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 8px; }
+        .time-slot {
+            padding: 9px 5px; border: 1.5px solid #e0e0e0; border-radius: 8px;
+            text-align: center; cursor: pointer; transition: all 0.2s; font-size: 0.85em; position: relative;
+        }
+        .time-slot:active { transform: scale(0.95); }
+        .time-slot.selected { background: #667eea; color: white; border-color: #667eea; }
+        .time-slot.booked { background: #f0f0f0; color: #bbb; cursor: not-allowed; border-color: #e0e0e0; }
+        .time-slot.conflict {
+            background: #fff3f3; color: #e53935; border-color: #e53935; cursor: pointer;
+        }
+        .time-slot.conflict::after {
+            content: '\26A0\FE0F 冲突';
+            display: block; font-size: 0.7em; color: #e53935; margin-top: 2px;
+        }
+        .time-slot.conflict:active { background: #ffe0e0; }
+
+        /* Conflict Banner */
+        .conflict-banner {
+            display: none; background: #fff3e0; border: 1.5px solid #ff9800;
+            border-radius: 10px; padding: 10px 12px; margin-bottom: 12px;
+            color: #e65100; font-size: 0.85em; line-height: 1.5;
+        }
+        .conflict-banner.visible { display: block; }
+
+        .confirm-btn {
+            width: 100%; padding: 13px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white; border: none; border-radius: 22px;
+            font-size: 1.05em; font-weight: bold; cursor: pointer;
+            box-shadow: 0 3px 10px rgba(102, 126, 234, 0.35);
+            transition: transform 0.2s;
+        }
+        .confirm-btn:active { transform: scale(0.97); }
+
+        /* Bookings list */
+        .my-bookings {
+            background: white; border-radius: 14px; padding: 20px;
+            margin-top: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.08);
+        }
+        .my-bookings-header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 14px;
+        }
+        .my-bookings-header h2 { color: #333; font-size: 1.15em; }
+        .booking-item {
+            display: flex; justify-content: space-between; align-items: flex-start;
+            padding: 12px; background: #f9f9f9; border-radius: 10px; margin-bottom: 8px;
+        }
+        .booking-info { flex: 1; min-width: 0; }
+        .booking-teacher { font-weight: bold; color: #333; font-size: 0.95em; }
+        .booking-time { color: #666; margin-top: 3px; font-size: 0.88em; }
+        .booking-venue { color: #999; font-size: 0.8em; margin-top: 2px; word-break: break-all; }
+        .cancel-btn {
+            padding: 8px 16px; background: #ff6b6b; color: white;
+            border: none; border-radius: 18px; cursor: pointer; font-size: 0.85em; white-space: nowrap; margin-left: 12px;
+            box-shadow: 0 2px 5px rgba(255,107,107,0.3);
+        }
+        .cancel-btn:active { transform: scale(0.95); }
+        .no-bookings { color: #999; text-align: center; padding: 16px; font-size: 0.9em; }
+
+        /* QR Modal */
+        .qr-modal {
+            display: none; position: fixed; inset: 0;
+            background: rgba(0,0,0,0.6); justify-content: center;
+            align-items: center; z-index: 2000;
+        }
+        .qr-modal.active { display: flex; }
+        .qr-box {
+            background: white; border-radius: 18px; padding: 28px 24px;
+            text-align: center; max-width: 320px; width: 92%;
+            animation: popIn 0.3s ease-out;
+        }
+        @keyframes popIn {
+            from { transform: scale(0.8); opacity: 0; }
+            to { transform: scale(1); opacity: 1; }
+        }
+        .qr-box h3 { color: #333; margin-bottom: 4px; font-size: 1.15em; }
+        .qr-box p { color: #888; font-size: 0.85em; margin-bottom: 14px; }
+        #qrcode { display: flex; justify-content: center; margin-bottom: 12px; }
+        .qr-tip { font-size: 0.78em; color: #999; margin-top: 6px; line-height: 1.5; }
+        .qr-close { margin-top: 14px; padding: 10px 26px; background: #667eea; color: white; border: none; border-radius: 22px; cursor: pointer; font-size: 0.98em; box-shadow: 0 3px 8px rgba(102,126,234,0.35); }
+        .qr-close:active { transform: scale(0.96); }
+
+        /* 圆形Logo样式 */
+        .qr-logo {
+            width: 100px; height: 100px; border-radius: 50%;
+            overflow: hidden; margin: 0 auto 16px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex; align-items: center; justify-content: center;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+        }
+        .qr-logo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .qr-logo-text { font-size: 3em; color: white; }
+
+        /* 浮动详情按钮 */
+        .share-fab {
+            position: fixed; bottom: 20px; right: 20px;
+            width: 56px; height: 56px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 28px;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.45);
+            cursor: pointer; z-index: 500;
+            transition: transform 0.25s, box-shadow 0.25s;
+            animation: fabBounce 2s ease-in-out infinite;
+        }
+        .share-fab:active { transform: scale(0.9); }
+        @keyframes fabBounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-6px); }
+        }
+
+        /* Toast */
+        .toast {
+            position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+            background: rgba(0,0,0,0.85); color: white;
+            padding: 12px 24px; border-radius: 24px;
+            font-size: 0.92em; z-index: 3000;
+            animation: toastIn 0.3s ease-out;
+            max-width: 85%; text-align: center;
+        }
+        @keyframes toastIn {
+            from { transform: translateX(-50%) translateY(20px); opacity: 0; }
+            to { transform: translateX(-50%) translateY(0); opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+
+    <div class="header">
+        <h1 id="adminTrigger" style="cursor:default;">📚 威睿达思（深圳）家长会</h1>
+        <!-- VERSION: v3-self-hosted-20260320 -->
+        <div class="date-info" id="meetingDateDisplay" style="cursor:pointer;" title="点击修改日期">📅 4月3日（周五）9:00–12:20</div>
+        <p id="meetingDesc" style="cursor:pointer;" title="点击修改介绍">家长会分两个阶段进行，详情点击右下角按钮查看</p>
+    </div>
+
+    <!-- 管理员工具栏 -->
+    <div class="toolbar" id="adminToolbar">
+        <button class="toolbar-btn btn-qr" onclick="showQR()">📱 分享二维码</button>
+        <button class="toolbar-btn btn-export" onclick="exportCSV()">📊 导出数据</button>
+        <button class="toolbar-btn btn-edit" onclick="editTeachers()">✏️ 编辑教师</button>
+    </div>
+
+    <!-- 浮动详情按钮 -->
+    <div class="share-fab" onclick="openDetailModal()" style="cursor:pointer;" title="查看详情">
+        📋
+    </div>
+
+    <div class="teacher-grid" id="teacherGrid"></div>
+
+    <div class="my-bookings">
+        <div class="my-bookings-header">
+            <h2>📋 已提交的预约</h2>
+        </div>
+        <div id="myBookingsList"></div>
+    </div>
+</div>
+
+<!-- Booking Modal -->
+<div class="modal" id="bookingModal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2 id="modalTeacherName">预约教师</h2>
+            <button class="close-btn" onclick="closeModal()">×</button>
+        </div>
+        <div class="conflict-banner" id="conflictBanner"></div>
+        <form id="bookingForm">
+            <div class="form-group">
+                <label>学生姓名</label>
+                <input type="text" id="studentName" required placeholder="请输入学生姓名" oninput="onStudentNameChange()">
+            </div>
+            <div class="form-group">
+                <label>家长联系电话</label>
+                <input type="tel" id="phone" required placeholder="请输入联系电话">
+            </div>
+            <div class="form-group">
+                <label>选择时间段</label>
+                <div class="time-slots" id="timeSlots"></div>
+            </div>
+            <div class="form-group">
+                <label>备注（可选）</label>
+                <textarea id="notes" rows="2" placeholder="您想讨论的问题或备注"></textarea>
+            </div>
+            <button type="submit" class="confirm-btn">✅ 确认预约</button>
+        </form>
+    </div>
+</div>
+
+<!-- QR Modal -->
+<div class="qr-modal" id="qrModal">
+    <div class="qr-box">
+        <div class="qr-logo">
+            <img src="logo.png" alt="威睿达思logo" id="schoolLogo" onerror="this.style.display='none'; this.parentElement.querySelector('.qr-logo-text').style.display='block';">
+            <div class="qr-logo-text" style="display:none;">📱</div>
+        </div>
+        <h3>微信扫码预约</h3>
+        <p>家长用微信扫一扫</p>
+        <div id="qrcode"></div>
+        <div class="qr-tip">微信扫一扫，分享给其他家长</div>
+        <button class="qr-close" onclick="closeQR()">关闭</button>
+    </div>
+</div>
+
+<!-- Detail Modal -->
+<div class="modal" id="detailModal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2>📋 家长会详情</h2>
+            <button class="close-btn" onclick="closeDetailModal()">×</button>
+        </div>
+        <div style="padding: 16px 0;">
+            <h3 style="color: #667eea; margin-bottom: 10px; font-size: 1.05em;">📋 阶段安排</h3>
+            <p style="margin-bottom:12px; line-height: 1.8;">👉 <strong>第一阶段 9:00-10:10</strong> 为集中家长会</p>
+            <p style="margin-bottom:15px; line-height: 1.8;">👉 <strong>第二阶段 10:20-12:20</strong> 采取一对一或二对一【一个任课老师或两个任课老师+一个家庭】见面会谈模式</p>
+
+            <h3 style="color: #667eea; margin-bottom: 10px; font-size: 1.05em; margin-top: 20px;">📝 温馨提醒</h3>
+            <ul style="padding-left: 18px; margin-top: 8px; line-height: 1.8;">
+                <li style="margin-bottom: 6px;">每组老师每家庭仅可预约一次，每次会谈时长为十分钟，请各位家长严格遵守时间安排</li>
+                <li style="margin-bottom: 6px;">为保证能够准时参会，预约时，请注意一个时段仅约一位老师，并注意空出时间前往下一个预约的教室面谈</li>
+                <li style="margin-bottom: 6px;">建议先跟孩子沟通了解孩子们的各科情况和各科存在的较突出的问题，与孩子们充分沟通后，带着目的跟任课老师见面；预约时也可以把每科重点问题备注在预约系统上；建议预约完成后让孩子们整理一份家长会面谈信息表，内容包括已预约教师、任教科目、预约时间、教室、关注问题</li>
+                <li><strong style="color:#e53935;">特别提示：</strong>Java/科创老师和日语老师只能预约 10:30-12:00 内的时间段</li>
+            </ul>
+        </div>
+    </div>
+</div>
+
+<script>
+// ==================== API 配置 ====================
+// 自动检测 API 地址（同源部署，无需跨域）
+const API_BASE = window.location.origin + '/api';
+const MEETING_DATE = '2026-04-03';
+
+// API 请求封装
+async function apiGet(path) {
+    const res = await fetch(`${API_BASE}${path}`);
+    const data = await res.json();
+    if (data.code !== 0) throw new Error(data.message || '请求失败');
+    return data.data;
+}
+
+async function apiPost(path, body) {
+    const res = await fetch(`${API_BASE}${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if (data.code !== 0) throw new Error(data.message || '请求失败');
+    return data.data;
+}
+
+async function apiDelete(path, body) {
+    const res = await fetch(`${API_BASE}${path}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: body ? JSON.stringify(body) : undefined
+    });
+    const data = await res.json();
+    if (data.code !== 0) throw new Error(data.message || '请求失败');
+    return data;
+}
+
+// ==================== 数据 ====================
+const TIME_SLOTS_ALL = [
+    '10:20-10:30','10:30-10:40','10:40-10:50','10:50-11:00',
+    '11:00-11:10','11:10-11:20','11:20-11:30','11:30-11:40',
+    '11:40-11:50','11:50-12:00','12:00-12:10','12:10-12:20'
+];
+const TIME_SLOTS_LIMITED = [
+    '10:30-10:40','10:40-10:50','10:50-11:00',
+    '11:00-11:10','11:10-11:20','11:20-11:30','11:30-11:40',
+    '11:40-11:50','11:50-12:00'
+];
+
+let teachers = [];
+let bookings = [];
+let isLoading = false;
+let selectedTeacher = null;
+let selectedSlot = null;
+
+// ==================== 数据加载 ====================
+async function loadTeachers() {
+    try {
+        const data = await apiGet(`/teachers?date=${MEETING_DATE}`);
+        teachers = data.map(t => ({
+            id: t.id,
+            name: t.name,
+            subject: t.subjects,
+            venue: t.venue,
+            icon: t.icon,
+            total: t.total_slots,
+            available: t.available_slots,
+            limited: t.limited_slots
+        }));
+    } catch (e) {
+        console.error('加载老师列表失败:', e);
+        showToast('⚠️ 加载老师数据失败');
+    }
+}
+
+async function loadBookings() {
+    isLoading = true;
+    try {
+        const data = await apiGet(`/bookings?date=${MEETING_DATE}`);
+        bookings = data.map(row => ({
+            id: row.id,
+            teacherId: row.teacher_id,
+            teacherName: row.teacher_name,
+            venue: row.venue,
+            studentName: row.student_name,
+            phone: row.phone,
+            date: row.date,
+            timeSlot: row.time_slot,
+            notes: row.notes || ''
+        }));
+    } catch (e) {
+        console.error('加载预约失败:', e);
+        showToast('⚠️ 数据加载失败，请检查网络');
+    }
+    isLoading = false;
+}
+
+// ==================== 渲染 ====================
+function renderTeachers() {
+    const grid = document.getElementById('teacherGrid');
+    grid.innerHTML = '';
+    teachers.forEach(t => {
+        const used = bookings.filter(b => b.teacherId === t.id).length;
+        const left = t.total - used;
+        const isFull = left <= 0;
+        const card = document.createElement('div');
+        card.className = 'teacher-card';
+        card.innerHTML = `
+            <div class="teacher-icon">${t.icon}</div>
+            <div class="teacher-name">${t.name}</div>
+            <div class="teacher-subject">${t.subject}</div>
+            <div class="teacher-venue">📍 ${t.venue}</div>
+            <div class="teacher-slots">
+                <div class="slots-title">剩余名额</div>
+                <div class="slots-count">${left}</div>
+            </div>
+            <button class="book-button ${isFull ? 'full' : ''}"
+                onclick="${isFull ? '' : 'openBookingModal(' + t.id + ')'}"
+                ${isFull ? 'disabled' : ''}>
+                ${isFull ? '已约满' : '立即预约'}
+            </button>
+        `;
+        grid.appendChild(card);
+    });
+}
+
+// ==================== 弹窗 ====================
+function openBookingModal(teacherId) {
+    selectedTeacher = teachers.find(t => t.id === teacherId);
+    selectedSlot = null;
+    document.getElementById('modalTeacherName').textContent = `预约 ${selectedTeacher.name}（${selectedTeacher.venue}）`;
+    document.getElementById('bookingForm').reset();
+    document.getElementById('conflictBanner').classList.remove('visible');
+    document.getElementById('conflictBanner').textContent = '';
+    renderTimeSlots('');
+    document.getElementById('bookingModal').classList.add('active');
+}
+function closeModal() {
+    document.getElementById('bookingModal').classList.remove('active');
+}
+
+// ==================== 时间段渲染 ====================
+function renderTimeSlots(studentName) {
+    const container = document.getElementById('timeSlots');
+    container.innerHTML = '';
+    selectedSlot = null;
+
+    const availableSlots = selectedTeacher.limited ? TIME_SLOTS_LIMITED : TIME_SLOTS_ALL;
+
+    const teacherBooked = bookings
+        .filter(b => b.teacherId === selectedTeacher.id && b.date === MEETING_DATE)
+        .map(b => b.timeSlot);
+
+    const studentBooked = studentName.trim()
+        ? bookings
+            .filter(b => b.studentName === studentName.trim() && b.date === MEETING_DATE && b.teacherId !== selectedTeacher.id)
+            .map(b => b.timeSlot)
+        : [];
+
+    availableSlots.forEach(slot => {
+        const el = document.createElement('div');
+        const isTeacherBooked = teacherBooked.includes(slot);
+        const isConflict = studentBooked.includes(slot);
+
+        if (isTeacherBooked) {
+            el.className = 'time-slot booked';
+            el.innerHTML = `${slot}<br><span style="font-size:0.68em;color:#bbb;">已约满</span>`;
+        } else if (isConflict) {
+            el.className = 'time-slot conflict';
+            el.textContent = slot;
+            el.onclick = () => { showConflictBanner(slot, studentName.trim()); };
+        } else {
+            el.className = 'time-slot';
+            el.textContent = slot;
+            el.onclick = () => selectSlot(slot, el);
+        }
+        container.appendChild(el);
+    });
+}
+
+function onStudentNameChange() {
+    const name = document.getElementById('studentName').value;
+    renderTimeSlots(name);
+    document.getElementById('conflictBanner').classList.remove('visible');
+}
+
+function selectSlot(slot, el) {
+    document.querySelectorAll('.time-slot').forEach(s => s.classList.remove('selected'));
+    el.classList.add('selected');
+    selectedSlot = slot;
+    document.getElementById('conflictBanner').classList.remove('visible');
+}
+
+function showConflictBanner(slot, studentName) {
+    const conflictBooking = bookings.find(b =>
+        b.studentName === studentName &&
+        b.date === MEETING_DATE &&
+        b.timeSlot === slot &&
+        b.teacherId !== selectedTeacher.id
+    );
+    const banner = document.getElementById('conflictBanner');
+    banner.innerHTML = `⚠️ 该学生「${studentName}」在 <strong>${slot}</strong> 已预约了 <strong>${conflictBooking ? conflictBooking.teacherName : '其他老师'}</strong>，请选择其他时间段，或在"已提交的预约"中取消。`;
+    banner.classList.add('visible');
+}
+
+// ==================== 提交预约 ====================
+document.getElementById('bookingForm').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    if (!selectedSlot) {
+        showToast('⚠️ 请先选择一个时间段');
+        return;
+    }
+    if (isLoading) {
+        showToast('⏳ 请稍候，正在处理...');
+        return;
+    }
+
+    const studentName = document.getElementById('studentName').value.trim();
+    const phone = document.getElementById('phone').value.trim();
+    const notes = document.getElementById('notes').value.trim();
+
+    // 前端校验冲突
+    const conflict = bookings.find(b =>
+        b.studentName === studentName &&
+        b.date === MEETING_DATE &&
+        b.timeSlot === selectedSlot &&
+        b.teacherId !== selectedTeacher.id
+    );
+    if (conflict) {
+        showConflictBanner(selectedSlot, studentName);
+        return;
+    }
+
+    isLoading = true;
+    showToast('⏳ 正在提交...');
+    try {
+        const newBooking = await apiPost('/bookings', {
+            teacher_id: selectedTeacher.id,
+            student_name: studentName,
+            phone: phone,
+            date: MEETING_DATE,
+            time_slot: selectedSlot,
+            notes: notes
+        });
+
+        // 把新预约加入本地数据
+        bookings.push({
+            id: newBooking.id,
+            teacherId: newBooking.teacher_id,
+            teacherName: newBooking.teacher_name,
+            venue: newBooking.venue,
+            studentName: newBooking.student_name,
+            phone: newBooking.phone,
+            date: newBooking.date,
+            timeSlot: newBooking.time_slot,
+            notes: newBooking.notes || ''
+        });
+
+        closeModal();
+        renderTeachers();
+        renderMyBookings();
+        showToast(`✅ 预约成功！\n${selectedTeacher.name}\n${selectedTeacher.venue}\n${selectedSlot}`);
+    } catch (e) {
+        console.error('预约失败:', e);
+        showToast('❌ ' + (e.message || '预约失败，请重试'));
+        // 重新加载数据
+        await loadBookings();
+        renderTeachers();
+        renderMyBookings();
+    }
+    isLoading = false;
+});
+
+// ==================== 预约列表 ====================
+function renderMyBookings() {
+    const list = document.getElementById('myBookingsList');
+    if (!bookings.length) {
+        list.innerHTML = '<div class="no-bookings">暂无预约记录</div>';
+        return;
+    }
+    const sorted = [...bookings].sort((a, b) => a.timeSlot.localeCompare(b.timeSlot));
+    list.innerHTML = sorted.map(b => `
+        <div class="booking-item">
+            <div class="booking-info">
+                <div class="booking-teacher">${b.teacherName} — ${b.studentName}</div>
+                <div class="booking-time">⏰ ${b.timeSlot}</div>
+                <div class="booking-venue">📍 ${b.venue}　📞 ${b.phone}</div>
+                ${b.notes ? `<div style="font-size:0.78em;color:#aaa;margin-top:3px;">备注：${b.notes}</div>` : ''}
+            </div>
+            <button class="cancel-btn" onclick="cancelBooking(${b.id})">取消</button>
+        </div>
+    `).join('');
+}
+
+async function cancelBooking(id) {
+    const booking = bookings.find(b => b.id === id);
+    if (!booking) return;
+
+    if (isAdminMode()) {
+        if (!confirm(`确定要取消这个预约吗？\n${booking.teacherName} — ${booking.studentName} — ${booking.timeSlot}`)) return;
+        // 管理员模式直接取消
+        isLoading = true;
+        showToast('⏳ 正在取消...');
+        try {
+            await apiDelete(`/bookings/${id}?admin=true`, {});
+            bookings = bookings.filter(b => b.id !== id);
+            renderTeachers();
+            renderMyBookings();
+            showToast('✅ 已取消预约');
+        } catch (e) {
+            showToast('❌ ' + (e.message || '取消失败'));
+            await loadBookings();
+            renderTeachers();
+            renderMyBookings();
+        }
+        isLoading = false;
+    } else {
+        const inputPhone = prompt(`请输入预约时填写的手机号以验证身份：\n（${booking.teacherName} — ${booking.studentName} — ${booking.timeSlot}）`);
+        if (inputPhone === null) return;
+
+        isLoading = true;
+        showToast('⏳ 正在取消...');
+        try {
+            await apiDelete(`/bookings/${id}`, { phone: inputPhone.trim() });
+            bookings = bookings.filter(b => b.id !== id);
+            renderTeachers();
+            renderMyBookings();
+            showToast('✅ 已取消预约');
+        } catch (e) {
+            showToast('❌ ' + (e.message || '取消失败'));
+        }
+        isLoading = false;
+    }
+}
+
+// ==================== 导出 CSV ====================
+function exportCSV() {
+    if (!bookings.length) {
+        showToast('暂无预约数据可导出');
+        return;
+    }
+    const header = ['序号', '老师', '地点', '学生姓名', '联系电话', '日期', '时间段', '备注'];
+    const rows = bookings
+        .sort((a, b) => a.timeSlot.localeCompare(b.timeSlot))
+        .map((b, i) => [
+            i + 1, b.teacherName, b.venue, b.studentName, b.phone,
+            b.date, b.timeSlot, b.notes || ''
+        ]);
+    const csv = '\uFEFF' + [header, ...rows]
+        .map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+        .join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `家长会预约记录_${MEETING_DATE}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('已导出数据到 CSV');
+}
+
+// ==================== 二维码 ====================
+function showQR() {
+    const modal = document.getElementById('qrModal');
+    const qrDiv = document.getElementById('qrcode');
+    qrDiv.innerHTML = '';
+    try {
+        new QRCode(qrDiv, {
+            text: window.location.href,
+            width: 180, height: 180,
+            colorDark: '#333333', colorLight: '#ffffff',
+            correctLevel: QRCode.CorrectLevel.H
+        });
+    } catch(e) {
+        qrDiv.innerHTML = '<div style="padding:16px;color:#666;font-size:0.85em;">需要网络加载二维码库</div>';
+    }
+    modal.classList.add('active');
+}
+function closeQR() { document.getElementById('qrModal').classList.remove('active'); }
+
+function openDetailModal() { document.getElementById('detailModal').classList.add('active'); }
+function closeDetailModal() { document.getElementById('detailModal').classList.remove('active'); }
+
+// ==================== Toast ====================
+function showToast(msg) {
+    const existing = document.querySelector('.toast');
+    if (existing) existing.remove();
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.textContent = msg;
+    toast.style.whiteSpace = 'pre-line';
+    document.body.appendChild(toast);
+    setTimeout(() => {
+        toast.style.transition = 'opacity 0.3s, transform 0.3s';
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateX(-50%) translateY(10px)';
+        setTimeout(() => toast.remove(), 300);
+    }, 2800);
+}
+
+// ==================== 管理员入口 ====================
+let clickCount = 0;
+const adminTrigger = document.getElementById('adminTrigger');
+if (adminTrigger) {
+    adminTrigger.addEventListener('click', () => {
+        clickCount++;
+        if (clickCount >= 10) {
+            const toolbar = document.getElementById('adminToolbar');
+            if (toolbar) {
+                toolbar.style.display = toolbar.style.display === 'none' ? 'flex' : 'none';
+                showToast(toolbar.style.display === 'none' ? '已隐藏管理员按钮' : '已显示管理员按钮');
+            }
+            clickCount = 0;
+        }
+    });
+}
+
+function isAdminMode() {
+    const toolbar = document.getElementById('adminToolbar');
+    return toolbar && toolbar.style.display !== 'none';
+}
+
+// 管理员编辑功能
+document.getElementById('meetingDateDisplay').addEventListener('click', () => {
+    if (!isAdminMode()) return;
+    const newDate = prompt('请输入新的日期格式，如：4月3日（周五）9:00–11:00', '4月3日（周五）10:20–12:20');
+    if (newDate) {
+        document.getElementById('meetingDateDisplay').textContent = '📅 ' + newDate;
+        localStorage.setItem('meetingDate', newDate);
+        showToast('日期已更新');
+    }
+});
+
+document.getElementById('meetingDesc').addEventListener('click', () => {
+    if (!isAdminMode()) return;
+    const newDesc = prompt('请输入新的介绍文字', '每10分钟一个，共12个时段');
+    if (newDesc) {
+        document.getElementById('meetingDesc').textContent = newDesc;
+        localStorage.setItem('meetingDesc', newDesc);
+        showToast('介绍已更新');
+    }
+});
+
+function editTeachers() {
+    if (!isAdminMode()) return;
+    const teachersJson = JSON.stringify(teachers, null, 2);
+    const modal = document.createElement('div');
+    modal.className = 'modal active';
+    modal.id = 'editTeachersModal';
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width:700px;">
+            <div class="modal-header">
+                <h2>✏️ 编辑教师信息</h2>
+                <button class="close-btn" onclick="closeEditModal()">×</button>
+            </div>
+            <div class="form-group">
+                <label>教师配置（JSON格式，可直接修改）</label>
+                <textarea id="teachersEditor" rows="15" style="font-family:monospace;font-size:0.85em;">${teachersJson}</textarea>
+            </div>
+            <div class="form-group">
+                <button class="confirm-btn" onclick="saveTeachers()">💾 保存修改</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+}
+
+function closeEditModal() {
+    const modal = document.getElementById('editTeachersModal');
+    if (modal) modal.remove();
+}
+
+function saveTeachers() {
+    try {
+        const editor = document.getElementById('teachersEditor');
+        if (!editor) { alert('找不到编辑器'); return; }
+        const newTeachers = JSON.parse(editor.value);
+        if (!Array.isArray(newTeachers)) throw new Error('必须是数组');
+        teachers = newTeachers;
+        renderTeachers();
+        showToast('✅ 教师信息已更新（仅当前设备生效）');
+        closeEditModal();
+    } catch (e) {
+        alert('❌ 格式错误：' + e.message);
+    }
+}
+
+// 点击遮罩关闭
+document.getElementById('bookingModal').addEventListener('click', function(e) { if (e.target === this) closeModal(); });
+document.getElementById('qrModal').addEventListener('click', function(e) { if (e.target === this) closeQR(); });
+const detailModal = document.getElementById('detailModal');
+if (detailModal) {
+    detailModal.addEventListener('click', function(e) { if (e.target === this) closeDetailModal(); });
+}
+
+// ==================== 初始化 ====================
+const savedDate = localStorage.getItem('meetingDate');
+if (savedDate) { document.getElementById('meetingDateDisplay').textContent = '📅 ' + savedDate; }
+const savedDesc = localStorage.getItem('meetingDesc');
+if (savedDesc) { document.getElementById('meetingDesc').textContent = savedDesc; }
+
+async function init() {
+    showToast('🔄 正在加载数据...');
+    try {
+        await Promise.all([loadTeachers(), loadBookings()]);
+        renderTeachers();
+        renderMyBookings();
+        showToast('✅ 数据加载完成');
+    } catch (e) {
+        console.error('初始化失败:', e);
+        showToast('⚠️ 数据加载失败，请刷新重试');
+    }
+}
+
+init();
+</script>
+</body>
+</html>

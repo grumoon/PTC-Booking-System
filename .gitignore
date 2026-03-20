@@ -1,21 +1,4 @@
-# Dependencies
 node_modules/
-__pycache__/
-*.pyc
 .env
-
-# Build
-dist/
-build/
-.next/
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
 .DS_Store
-
-# Logs
 *.log
-npm-debug.log*
