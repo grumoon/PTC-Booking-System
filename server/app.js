@@ -267,7 +267,35 @@ app.post('/api/bookings', bookingLimiter, async (req, res) => {
   }
 });
 
-// 4. 取消预约
+// 4. 查询我的预约（根据手机号）
+app.get('/api/my-bookings', rateLimit({
+  windowMs: 60 * 1000, max: 20,
+  message: { code: 429, message: '查询过于频繁，请稍后再试' }
+}), async (req, res) => {
+  try {
+    const phone = req.query.phone?.trim();
+    const date = req.query.date || await getMeetingDate();
+
+    if (!phone) {
+      return res.status(400).json({ code: 400, message: '请输入手机号' });
+    }
+
+    const [rows] = await pool.execute(
+      `SELECT id, teacher_id, teacher_name, venue, student_name, phone, date, time_slot, notes, created_at
+       FROM bookings
+       WHERE phone = ? AND date = ? AND status = 1
+       ORDER BY time_slot ASC`,
+      [phone, date]
+    );
+
+    res.json({ code: 0, data: rows });
+  } catch (err) {
+    console.error('查询我的预约失败:', err);
+    res.status(500).json({ code: 500, message: '服务器内部错误' });
+  }
+});
+
+// 5. 取消预约
 app.delete('/api/bookings/:id', bookingLimiter, async (req, res) => {
   try {
     const bookingId = parseInt(req.params.id);

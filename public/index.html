@@ -241,9 +241,17 @@
 
     <div class="my-bookings">
         <div class="my-bookings-header">
-            <h2>📋 已提交的预约</h2>
+            <h2>📋 我的预约</h2>
         </div>
-        <div id="myBookingsList"></div>
+        <div class="my-bookings-query" id="myBookingsQuery">
+            <div style="display:flex; gap:8px; margin-bottom:12px;">
+                <input type="tel" id="queryPhone" placeholder="输入手机号查看我的预约" style="flex:1; padding:10px 14px; border:1.5px solid #e0e0e0; border-radius:22px; font-size:0.95em; outline:none; transition:border-color 0.2s;" onfocus="this.style.borderColor='#667eea'" onblur="this.style.borderColor='#e0e0e0'">
+                <button onclick="queryMyBookings()" style="padding:10px 20px; background:linear-gradient(135deg,#667eea 0%,#764ba2 100%); color:white; border:none; border-radius:22px; font-size:0.9em; font-weight:bold; cursor:pointer; white-space:nowrap; box-shadow:0 2px 8px rgba(102,126,234,0.35);">查询</button>
+            </div>
+        </div>
+        <div id="myBookingsList">
+            <div class="no-bookings">输入预约时填写的手机号，查看您的预约记录</div>
+        </div>
     </div>
 </div>
 
@@ -350,9 +358,11 @@ const TIME_SLOTS_LIMITED = [
 
 let teachers = [];
 let bookings = [];
+let myBookings = []; // 我的预约（通过手机号查询）
 let isLoading = false;
 let selectedTeacher = null;
 let selectedSlot = null;
+const LS_PHONE_KEY = 'ptc_booking_phone'; // LocalStorage key
 
 // ==================== 数据加载 ====================
 async function loadTeachers() {
@@ -431,6 +441,10 @@ function openBookingModal(teacherId) {
     selectedSlot = null;
     document.getElementById('modalTeacherName').textContent = `预约 ${selectedTeacher.name}（${selectedTeacher.venue}）`;
     document.getElementById('bookingForm').reset();
+    // 自动填入保存的手机号
+    let savedPhone = '';
+    try { savedPhone = localStorage.getItem(LS_PHONE_KEY) || ''; } catch(e) {}
+    if (savedPhone) document.getElementById('phone').value = savedPhone;
     document.getElementById('conflictBanner').classList.remove('visible');
     document.getElementById('conflictBanner').textContent = '';
     renderTimeSlots('');
@@ -500,7 +514,7 @@ function showConflictBanner(slot, studentName) {
         b.teacherId !== selectedTeacher.id
     );
     const banner = document.getElementById('conflictBanner');
-    banner.innerHTML = `⚠️ 该学生「${studentName}」在 <strong>${slot}</strong> 已预约了 <strong>${conflictBooking ? conflictBooking.teacherName : '其他老师'}</strong>，请选择其他时间段，或在"已提交的预约"中取消。`;
+    banner.innerHTML = `⚠️ 该学生「${studentName}」在 <strong>${slot}</strong> 已预约了 <strong>${conflictBooking ? conflictBooking.teacherName : '其他老师'}</strong>，请选择其他时间段，或在"我的预约"中取消。`;
     banner.classList.add('visible');
 }
 
@@ -557,8 +571,15 @@ document.getElementById('bookingForm').addEventListener('submit', async function
             notes: newBooking.notes || ''
         });
 
+        // 保存手机号到 LocalStorage，自动填入查询框
+        const bookedPhone = phone;
+        try { localStorage.setItem(LS_PHONE_KEY, bookedPhone); } catch(e) {}
+        document.getElementById('queryPhone').value = bookedPhone;
+
         closeModal();
         renderTeachers();
+        // 刷新我的预约
+        await loadMyBookings(bookedPhone);
         renderMyBookings();
         showToast(`✅ 预约成功！\n${selectedTeacher.name}\n${selectedTeacher.venue}\n${selectedSlot}`);
     } catch (e) {
@@ -572,20 +593,71 @@ document.getElementById('bookingForm').addEventListener('submit', async function
     isLoading = false;
 });
 
-// ==================== 预约列表 ====================
+// ==================== 我的预约查询 ====================
+async function loadMyBookings(phone) {
+    if (!phone?.trim()) return;
+    try {
+        const data = await apiGet(`/my-bookings?phone=${encodeURIComponent(phone.trim())}&date=${MEETING_DATE}`);
+        myBookings = data.map(row => ({
+            id: row.id,
+            teacherId: row.teacher_id,
+            teacherName: row.teacher_name,
+            venue: row.venue,
+            studentName: row.student_name,
+            phone: row.phone,
+            date: row.date,
+            timeSlot: row.time_slot,
+            notes: row.notes || ''
+        }));
+    } catch (e) {
+        console.error('查询我的预约失败:', e);
+        myBookings = [];
+    }
+}
+
+function queryMyBookings() {
+    const phone = document.getElementById('queryPhone').value.trim();
+    if (!phone) {
+        showToast('⚠️ 请输入手机号');
+        return;
+    }
+    // 保存到 LocalStorage
+    try { localStorage.setItem(LS_PHONE_KEY, phone); } catch(e) {}
+    showToast('🔍 正在查询...');
+    loadMyBookings(phone).then(() => {
+        renderMyBookings();
+        if (myBookings.length === 0) {
+            showToast('📭 未找到该手机号的预约记录');
+        } else {
+            showToast(`✅ 找到 ${myBookings.length} 条预约`);
+        }
+    });
+}
+
+// 支持回车查询
+document.getElementById('queryPhone').addEventListener('keyup', function(e) {
+    if (e.key === 'Enter') queryMyBookings();
+});
+
 function renderMyBookings() {
     const list = document.getElementById('myBookingsList');
-    if (!bookings.length) {
+    const phone = document.getElementById('queryPhone').value.trim();
+
+    if (!phone) {
+        list.innerHTML = '<div class="no-bookings">输入预约时填写的手机号，查看您的预约记录</div>';
+        return;
+    }
+    if (!myBookings.length) {
         list.innerHTML = '<div class="no-bookings">暂无预约记录</div>';
         return;
     }
-    const sorted = [...bookings].sort((a, b) => a.timeSlot.localeCompare(b.timeSlot));
+    const sorted = [...myBookings].sort((a, b) => a.timeSlot.localeCompare(b.timeSlot));
     list.innerHTML = sorted.map(b => `
         <div class="booking-item">
             <div class="booking-info">
                 <div class="booking-teacher">${b.teacherName} — ${b.studentName}</div>
                 <div class="booking-time">⏰ ${b.timeSlot}</div>
-                <div class="booking-venue">📍 ${b.venue}　📞 ${b.phone}</div>
+                <div class="booking-venue">📍 ${b.venue}</div>
                 ${b.notes ? `<div style="font-size:0.78em;color:#aaa;margin-top:3px;">备注：${b.notes}</div>` : ''}
             </div>
             <button class="cancel-btn" onclick="cancelBooking(${b.id})">取消</button>
@@ -594,16 +666,18 @@ function renderMyBookings() {
 }
 
 async function cancelBooking(id) {
-    const booking = bookings.find(b => b.id === id);
+    const booking = myBookings.find(b => b.id === id);
     if (!booking) return;
 
-    const inputPhone = prompt(`请输入预约时填写的手机号以验证身份：\n（${booking.teacherName} — ${booking.studentName} — ${booking.timeSlot}）`);
-    if (inputPhone === null) return;
+    if (!confirm(`确认取消预约？\n${booking.teacherName} — ${booking.studentName}\n${booking.timeSlot}`)) return;
 
+    const phone = document.getElementById('queryPhone').value.trim();
     isLoading = true;
     showToast('⏳ 正在取消...');
     try {
-        await apiDelete(`/bookings/${id}`, { phone: inputPhone.trim() });
+        await apiDelete(`/bookings/${id}`, { phone });
+        // 从本地数据中移除
+        myBookings = myBookings.filter(b => b.id !== id);
         bookings = bookings.filter(b => b.id !== id);
         renderTeachers();
         renderMyBookings();
@@ -647,8 +721,23 @@ async function init() {
     try {
         await Promise.all([loadTeachers(), loadBookings()]);
         renderTeachers();
-        renderMyBookings();
-        showToast('✅ 数据加载完成');
+
+        // 从 LocalStorage 恢复手机号并自动查询
+        let savedPhone = '';
+        try { savedPhone = localStorage.getItem(LS_PHONE_KEY) || ''; } catch(e) {}
+        if (savedPhone) {
+            document.getElementById('queryPhone').value = savedPhone;
+            await loadMyBookings(savedPhone);
+            renderMyBookings();
+            if (myBookings.length > 0) {
+                showToast(`✅ 已加载 ${myBookings.length} 条预约`);
+            } else {
+                showToast('✅ 数据加载完成');
+            }
+        } else {
+            renderMyBookings();
+            showToast('✅ 数据加载完成');
+        }
     } catch (e) {
         console.error('初始化失败:', e);
         showToast('⚠️ 数据加载失败，请刷新重试');
