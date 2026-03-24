@@ -269,6 +269,12 @@
             table { font-size: 0.82em; }
             td, th { padding: 8px 6px; }
         }
+        /* 表头排序样式 */
+        th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+        th.sortable:hover { background: rgba(102,126,234,0.08); }
+        th.sortable::after { content: '⇅'; opacity: 0.25; margin-left: 3px; font-size: 0.85em; }
+        th.sort-asc::after { content: '↑'; opacity: 1; color: #667eea; }
+        th.sort-desc::after { content: '↓'; opacity: 1; color: #667eea; }
     </style>
 </head>
 <body>
@@ -558,6 +564,54 @@ async function adminFetch(path, options = {}) {
     return data.data;
 }
 
+// ==================== 通用排序 ====================
+const sortState = {}; // { tableId: { key: 'name', dir: 'asc' } }
+const sortCache = {}; // { tableId: [原始数据行] }
+
+function handleSort(tableId, key) {
+    const state = sortState[tableId] || {};
+    if (state.key === key) {
+        state.dir = state.dir === 'asc' ? 'desc' : 'asc';
+    } else {
+        state.key = key;
+        state.dir = 'asc';
+    }
+    sortState[tableId] = state;
+
+    // 更新表头样式
+    const table = document.querySelector(`#${tableId} table`);
+    if (table) {
+        table.querySelectorAll('th').forEach(th => {
+            th.classList.remove('sort-asc', 'sort-desc');
+        });
+        const activeTh = table.querySelector(`th[data-sort="${key}"]`);
+        if (activeTh) activeTh.classList.add(state.dir === 'asc' ? 'sort-asc' : 'sort-desc');
+    }
+
+    // 排序并重新渲染 tbody
+    const data = sortCache[tableId];
+    if (!data || !data.length) return;
+
+    const { dir } = state;
+    const sorted = [...data].sort((a, b) => {
+        let va = a[key], vb = b[key];
+        if (va == null) va = '';
+        if (vb == null) vb = '';
+        if (typeof va === 'number' && typeof vb === 'number') return dir === 'asc' ? va - vb : vb - va;
+        const ca = String(va), cb = String(vb);
+        const cmp = ca.localeCompare(cb, 'zh-CN', { numeric: true });
+        return dir === 'asc' ? cmp : -cmp;
+    });
+
+    const tbody = table.querySelector('tbody');
+    if (tbody) {
+        // 利用已有的 renderRows 函数
+        if (sortCache[tableId + '_render']) {
+            sortCache[tableId + '_render'](sorted);
+        }
+    }
+}
+
 // ==================== 登录 ====================
 function showLogin() {
     document.getElementById('loginPage').style.display = 'flex';
@@ -779,12 +833,10 @@ async function loadAdminBookings() {
             return;
         }
 
-        tableEl.innerHTML = `<table>
-            <thead><tr>
-                <th>ID</th><th>老师</th><th>学生</th><th>电话</th>
-                <th>时段</th><th>教室</th><th>预约时间</th><th>取消时间</th><th>取消者</th><th>状态</th><th>操作</th>
-            </tr></thead>
-            <tbody>${data.list.map(b => {
+        sortCache['bookingsTable'] = data.list;
+        sortState['bookingsTable'] = { key: 'id', dir: 'asc' };
+        sortCache['bookingsTable_render'] = (rows) => {
+            tableEl.querySelector('tbody').innerHTML = rows.map(b => {
                 const bookedTime = b.booked_at ? new Date(b.booked_at).toLocaleString('zh-CN') : '-';
                 const cancelledTime = b.cancelled_at ? new Date(b.cancelled_at).toLocaleString('zh-CN') : '-';
                 const cancelledBy = b.cancelled_by === 'parent' ? '家长' : b.cancelled_by === 'admin' ? '管理员' : '-';
@@ -801,8 +853,28 @@ async function loadAdminBookings() {
                 <td><span class="status-badge ${b.status === 1 ? 'status-active' : 'status-cancelled'}">${b.status === 1 ? '有效' : '已取消'}</span></td>
                 <td>${b.status === 1 ? `<button class="btn btn-danger btn-sm" onclick="adminCancel(${b.id},'${b.teacher_name}','${b.student_name}')">取消</button>` : '-'}</td>
             </tr>`;
-            }).join('')}</tbody>
+            }).join('');
+        };
+
+            tableEl.innerHTML = `<table>
+            <thead><tr>
+                <th class="sortable sort-asc" data-sort="id" onclick="handleSort('bookingsTable','id')">ID</th>
+                <th class="sortable" data-sort="teacher_name" onclick="handleSort('bookingsTable','teacher_name')">老师</th>
+                <th class="sortable" data-sort="student_name" onclick="handleSort('bookingsTable','student_name')">学生</th>
+                <th class="sortable" data-sort="phone" onclick="handleSort('bookingsTable','phone')">电话</th>
+                <th class="sortable" data-sort="time_slot" onclick="handleSort('bookingsTable','time_slot')">时段</th>
+                <th class="sortable" data-sort="venue" onclick="handleSort('bookingsTable','venue')">教室</th>
+                <th class="sortable" data-sort="booked_at" onclick="handleSort('bookingsTable','booked_at')">预约时间</th>
+                <th class="sortable" data-sort="cancelled_at" onclick="handleSort('bookingsTable','cancelled_at')">取消时间</th>
+                <th class="sortable" data-sort="cancelled_by" onclick="handleSort('bookingsTable','cancelled_by')">取消者</th>
+                <th class="sortable" data-sort="status" onclick="handleSort('bookingsTable','status')">状态</th>
+                <th>操作</th>
+            </tr></thead>
+            <tbody></tbody>
         </table>`;
+        // 初始按 ID 降序排序后渲染
+        const initSorted = [...data.list].sort((a, b) => a.id - b.id);
+        sortCache['bookingsTable_render'](initSorted);
 
         renderPagination('bookingsPagination', data, (p) => { bookingsPage = p; loadAdminBookings(); });
     } catch (e) {
@@ -919,12 +991,11 @@ async function loadTeachers() {
     try {
         const rows = await adminFetch('/admin/teachers');
         const tableEl = document.getElementById('teachersTable');
-        tableEl.innerHTML = `<table>
-            <thead><tr>
-                <th>ID</th><th>图标</th><th>姓名</th><th>科目</th>
-                <th>教室</th><th>名额</th><th>限制时段</th><th>操作</th>
-            </tr></thead>
-            <tbody>${rows.map(t => `<tr>
+
+        sortCache['teachersTable'] = rows;
+        sortState['teachersTable'] = { key: 'id', dir: 'asc' };
+        sortCache['teachersTable_render'] = (sorted) => {
+            tableEl.querySelector('tbody').innerHTML = sorted.map(t => `<tr>
                 <td>${t.id}</td>
                 <td>${t.icon}</td>
                 <td><strong>${t.name}</strong></td>
@@ -936,8 +1007,24 @@ async function loadTeachers() {
                     <button class="btn btn-outline btn-sm" onclick='editTeacher(${JSON.stringify(t)})'>编辑</button>
                     <button class="btn btn-danger btn-sm" onclick="deleteTeacher(${t.id},'${t.name}')">删除</button>
                 </td>
-            </tr>`).join('')}</tbody>
+            </tr>`).join('');
+        };
+
+        tableEl.innerHTML = `<table>
+            <thead><tr>
+                <th class="sortable sort-asc" data-sort="id" onclick="handleSort('teachersTable','id')">ID</th>
+                <th class="sortable" data-sort="icon" onclick="handleSort('teachersTable','icon')">图标</th>
+                <th class="sortable" data-sort="name" onclick="handleSort('teachersTable','name')">姓名</th>
+                <th class="sortable" data-sort="subjects" onclick="handleSort('teachersTable','subjects')">科目</th>
+                <th class="sortable" data-sort="venue" onclick="handleSort('teachersTable','venue')">教室</th>
+                <th class="sortable" data-sort="total_slots" onclick="handleSort('teachersTable','total_slots')">名额</th>
+                <th class="sortable" data-sort="limited_slots" onclick="handleSort('teachersTable','limited_slots')">限制时段</th>
+                <th>操作</th>
+            </tr></thead>
+            <tbody></tbody>
         </table>`;
+        const initSorted = [...rows].sort((a, b) => a.id - b.id);
+        sortCache['teachersTable_render'](initSorted);
     } catch (e) {
         console.error('加载教师列表失败:', e);
     }
@@ -1149,17 +1236,29 @@ async function loadStudents() {
             tableEl.innerHTML = '<div class="empty-state">暂无学生，请添加或批量导入</div>';
             return;
         }
-        tableEl.innerHTML = `<table>
-            <thead><tr>
-                <th>ID</th><th>姓名</th><th>班级</th><th>操作</th>
-            </tr></thead>
-            <tbody>${rows.map(s => `<tr>
+
+        sortCache['studentsTable'] = rows;
+        sortState['studentsTable'] = { key: 'id', dir: 'asc' };
+        sortCache['studentsTable_render'] = (sorted) => {
+            tableEl.querySelector('tbody').innerHTML = sorted.map(s => `<tr>
                 <td>${s.id}</td>
                 <td><strong>${s.name}</strong></td>
                 <td>${s.class_name || '-'}</td>
                 <td><button class="btn btn-danger btn-sm" onclick="deleteStudent(${s.id},'${s.name.replace(/'/g, "\\'")}')">删除</button></td>
-            </tr>`).join('')}</tbody>
+            </tr>`).join('');
+        };
+
+        tableEl.innerHTML = `<table>
+            <thead><tr>
+                <th class="sortable sort-asc" data-sort="id" onclick="handleSort('studentsTable','id')">ID</th>
+                <th class="sortable" data-sort="name" onclick="handleSort('studentsTable','name')">姓名</th>
+                <th class="sortable" data-sort="class_name" onclick="handleSort('studentsTable','class_name')">班级</th>
+                <th>操作</th>
+            </tr></thead>
+            <tbody></tbody>
         </table>`;
+        const initSorted = [...rows].sort((a, b) => a.id - b.id);
+        sortCache['studentsTable_render'](initSorted);
     } catch (e) {
         console.error('加载学生名册失败:', e);
     }
